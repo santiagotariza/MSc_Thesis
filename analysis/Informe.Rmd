@@ -1,0 +1,1064 @@
+---
+title: "Análisis Integral de Datos de RNA-seq"
+author: "Santiago T. Ariza"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    theme: cosmo
+    highlight: tango
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center", fig.width = 10, fig.height = 8)
+
+```
+
+# 1. Introducción
+
+Este informe presenta un análisis exhaustivo de expresión diferencial de genes (DEG) y análisis de enriquecimiento funcional en respuesta a diferentes tratamientos, utilizando datos de conteo de genes. Los tratamientos analizados son:
+
+    NTC: No-Treatment Control (G1)
+    WTC: Wild-Type Extracellular Vesicles Treated (G2)
+    H1KOC: HMGB1 Knockout Extracellular Vesicles Treated (G3)
+    H2KOC: HMGB2 Knockout Extracellular Vesicles Treated (G4)
+
+El objetivo es identificar genes diferencialmente expresados entre los grupos y comprender las vías biológicas y funciones moleculares que se ven afectadas.
+
+# 2. Carga de Librerías y Preparación de Datos
+
+Cargamos todas las librerías necesarias para el análisis. Asegúrate de tenerlas instaladas. Si no es así, las líneas `install.packages()` o `BiocManager::install()` en los scripts originales deberían manejarlas,
+
+
+```{r}
+# Instalar y cargar BiocManager si no está disponible
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+# Cargar librerías
+if (!requireNamespace("DESeq2", quietly = TRUE)) BiocManager::install("DESeq2")
+if (!requireNamespace("pheatmap", quietly = TRUE)) install.packages("pheatmap")
+if (!requireNamespace("ggplot2", quietly = TRUE)) install.packages("ggplot2")
+if (!requireNamespace("dplyr", quietly = TRUE)) install.packages("dplyr")
+if (!requireNamespace("RColorBrewer", quietly = TRUE)) install.packages("RColorBrewer")
+if (!requireNamespace("genefilter", quietly = TRUE)) BiocManager::install("genefilter")
+if (!requireNamespace("apeglm", quietly = TRUE)) BiocManager::install("apeglm")
+if (!requireNamespace("EnhancedVolcano", quietly = TRUE)) BiocManager::install("EnhancedVolcano")
+if (!requireNamespace("clusterProfiler", quietly = TRUE)) BiocManager::install("clusterProfiler")
+if (!requireNamespace("org.Hs.eg.db", quietly = TRUE)) BiocManager::install("org.Hs.eg.db")
+if (!requireNamespace("ReactomePA", quietly = TRUE)) BiocManager::install("ReactomePA")
+if (!requireNamespace("DOSE", quietly = TRUE)) BiocManager::install("DOSE")
+if (!requireNamespace("enrichplot", quietly = TRUE)) BiocManager::install("enrichplot")
+if (!requireNamespace("pathview", quietly = TRUE)) BiocManager::install("pathview")
+if (!requireNamespace("fgsea", quietly = TRUE)) BiocManager::install("fgsea")
+if (!requireNamespace("msigdbr", quietly = TRUE)) install.packages("msigdbr")
+if (!requireNamespace("tibble", quietly = TRUE)) install.packages("tibble") # Para rownames_to_column
+
+library(DESeq2)
+library(pheatmap)
+library(ggplot2)
+library(dplyr)
+library(RColorBrewer)
+library(genefilter) # Para rowVars
+library(apeglm)
+library(EnhancedVolcano)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(ReactomePA)
+library(DOSE)
+library(enrichplot)
+library(pathview)
+library(fgsea)
+library(msigdbr)
+library(tibble) # Para rownames_to_column
+
+message("Todas las librerías cargadas.")
+
+# Cargar datos de conteo
+counts <- read.table("gene_counts.txt", header = TRUE, row.names = 1)
+counts <- counts[, grep("Aligned", colnames(counts))]
+
+# --- MODIFICACIÓN CLAVE AQUÍ ---
+# Definir los nuevos nombres de las muestras usando los nombres de los grupos y réplicas
+# Asumiendo que el orden de las columnas en 'counts' es consistente (3 NTC, 3 WTC, 3 H1KOC, 3 H2KOC)
+new_sample_names <- c(
+  "NTC_R1", "NTC_R2", "NTC_R3",  # Replicas para NTC
+  "WTC_R1", "WTC_R2", "WTC_R3",  # Replicas para WTC
+  "H1KOC_R1", "H1KOC_R2", "H1KOC_R3", # Replicas para H1KOC
+  "H2KOC_R1", "H2KOC_R2", "H2KOC_R3"  # Replicas para H2KOC
+)
+colnames(counts) <- new_sample_names
+
+# Definir las condiciones usando los nombres originales (NTC, WTC, H1KOC, H2KOC)
+col_data <- data.frame(
+  condition = factor(c(rep("NTC", 3), rep("WTC", 3), rep("H1KOC", 3), rep("H2KOC", 3)),
+                     levels = c("NTC", "WTC", "H1KOC", "H2KOC")) # Establecer los niveles en este orden
+)
+rownames(col_data) <- colnames(counts)
+
+# Asegurarse de que el orden de las columnas en counts sea el mismo que el de las filas en col_data
+counts <- counts[, rownames(col_data)]
+
+message("Datos de conteo cargados y metadata preparada con nombres de muestra NTC/WTC/H1KOC/H2KOC.")
+```
+
+# 3. Control de Calidad y PCA (Script 1)
+
+Realizamos un análisis de control de calidad y un Análisis de Componentes Principales (PCA) para evaluar la variabilidad entre las muestras y la agrupación por tratamiento.
+
+```{r}
+# Crear objeto DESeqDataSet
+dds <- DESeqDataSetFromMatrix(countData = counts,
+                              colData = col_data,
+                              design = ~ condition)
+
+# Pre-filtrado para reducir el tamaño del objeto y acelerar el cálculo
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+
+# Normalización de varianza (para PCA y Heatmaps)
+vsd <- vst(dds, blind = TRUE)
+
+# PCA Plot
+# Generar los datos para PCA
+pcaData <- plotPCA(vsd, intgroup = "condition", returnData = TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+# Añadir los nombres de las réplicas como una columna en pcaData
+# Los rownames de pcaData son los nombres de las muestras (ej. NTC_R1, WTC_R2)
+pcaData$Replica <- rownames(pcaData)
+
+# Plotear PCA con etiquetas de réplica
+ggplot(pcaData, aes(PC1, PC2, color = condition)) +
+  geom_point(size = 3) +
+  # Añadir etiquetas de texto para cada punto
+  # Usamos 'hjust' y 'vjust' para ajustar la posición del texto respecto al punto
+  geom_text(aes(label = Replica), hjust = -0.1, vjust = -0.5, size = 3.5) + # Ajusta size si el texto es muy grande/pequeño
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+  ggtitle("PCA de Muestras por Condición de Tratamiento") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+message("PCA generado.")
+```
+
+**Interpretación del PCA:**
+El gráfico PCA muestra una clara separación de las muestras del grupo NTC (control) con respecto a los grupos WTC, H1KOC y H2KOC a lo largo del PC1 (que explica el `r percentVar[1]`% de la varianza). Esto indica que los tratamientos aplicados tienen un efecto substancial en el perfil de expresión génica. Entre los grupos tratados (WTC, H1KOC, H2KOC), también se observa una distinción, principalmente a lo largo del PC2 (que explica el `r percentVar[2]`% de la varianza), lo que sugiere que cada tipo de vesicula extracelular (EV) induce respuestas genéticas diferentes, aunque relacionadas. Las réplicas dentro de cada grupo se agrupan estrechamente, lo cual es un buen indicador de la consistencia experimental.
+
+## 3.2. Mapas de Calor de Distancias de Muestras
+
+Este heatmap visualiza las distancias euclidianas entre las muestras, lo que es otra forma de evaluar la reproducibilidad dentro de los grupos y la separación entre ellos.
+
+
+```{r}
+# Cálculo de la matriz de distancia
+sampleDists <- dist(t(assay(vsd)))
+sampleDistMatrix <- as.matrix(sampleDists)
+rownames(sampleDistMatrix) <- paste(vsd$condition, rownames(col_data), sep = "_")
+colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette(rev(brewer.pal(9, "Blues")))(255)
+
+# Crear el heatmap de distancias
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows = sampleDists,
+         clustering_distance_cols = sampleDists,
+         col = colors,
+         main = "Heatmap de Distancias entre Muestras")
+message("Heatmap de distancias de muestras generado.")
+```
+
+**Interpretación del Heatmap:**
+El heatmap de distancias de muestras refuerza los hallazgos del PCA. Se observa una clara agrupación por condición, donde las réplicas biológicas dentro de un mismo grupo (NTC, WTC, H1KOC, H2KOC) muestran una baja distancia (indicando alta similitud), mientras que las distancias son mayores entre grupos diferentes. Esto confirma la reproducibilidad de las muestras dentro de cada tratamiento y la robusta diferenciación de expresión inducida por los distintos tipos de EVs.
+
+## 3.3. Heatmap de los Genes Más Variables
+
+Visualización de la expresión de los genes más variables para ver patrones entre los grupos.
+
+
+```{r}
+# Heatmap de las 1000 genes más variables
+topVarGenes <- head(order(rowVars(assay(vsd)), decreasing = TRUE), 1000)
+heatmap_matrix <- assay(vsd)[topVarGenes, ]
+
+# Escalar la matriz para el heatmap (opcional, pero útil para visualización)
+# heatmap_matrix <- t(scale(t(heatmap_matrix)))
+
+# Crear el heatmap
+pheatmap(
+  heatmap_matrix,
+  cluster_rows = TRUE,
+  cluster_cols = TRUE,
+  show_rownames = FALSE,
+  show_colnames = TRUE,
+  annotation_col = col_data,
+  main = "Heatmap de los 1000 Genes Más Variables por Tratamiento",
+  fontsize_col = 8,
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  cutree_cols = 4 # Intenta cortar el dendrograma de columnas en 4 grupos
+)
+
+message("Heatmap comparativo de tratamientos (top 1000 genes más variables) generado.")
+```
+
+**Interpretación de Heatmap de Genes Variables:**
+El heatmap de los 1000 genes más variables también revela patrones de expresión distintos para cada grupo de tratamiento. Se observan clústeres de genes que están consistentemente up-regulados o down-regulados en respuesta a las diferentes condiciones WTC, H1KOC y H2KOC en comparación con NTC. Esto indica que los tratamientos con EVs tienen un impacto global y bien diferenciado en el perfil de expresión génica, con grupos de genes mostrando cambios coordinados.
+
+# 4. Análisis de Expresión Diferencial (DEGs)
+
+En esta sección, identificamos los genes diferencialmente expresados (DEGs) para cada comparación utilizando DESeq2. La función `analyze_and_save_degs` simplifica este proceso, generando los resultados completos y los plots MA y Volcano.
+
+```{r}
+# Ejecutar el análisis DESeq2
+dds <- DESeq(dds)
+
+# Función para realizar el análisis DE, guardar resultados y generar plots
+analyze_and_save_degs <- function(dds_obj, contrast_levels, output_prefix) {
+  message(paste0("\nRealizando análisis para: ", paste(contrast_levels, collapse = " vs ")))
+  
+  # Realizar contraste
+  res <- results(dds_obj, contrast = c("condition", contrast_levels[1], contrast_levels[2]), alpha = 0.05)
+  
+  # Determine the coefficient name for apeglm shrinkage
+  # The coefficient name follows the pattern "condition_YOUR_LEVEL_vs_REFERENCE_LEVEL"
+  # Assuming NTC is always the reference (first in levels)
+  coef_name <- paste0("condition_", contrast_levels[1], "_vs_", contrast_levels[2])
+  
+  # Aplicar retracción de Log2 Fold Change (LFC) usando 'coef' para apeglm
+  
+  # Make sure the coef_name is correct based on your DESeq2 resultsNames(dds_obj)
+  # You might want to run resultsNames(dds) after dds <- DESeq(dds) to verify these names.
+  if (coef_name %in% resultsNames(dds_obj)) {
+    res_lfc_shrink <- lfcShrink(dds_obj, coef = coef_name, res = res, type = "apeglm")
+  } else {
+    message(paste0("  WARNING: Coefficient '", coef_name, "' not found. Falling back to default LFC shrinkage (if available) or no shrinkage."))
+    # A safe fallback is 'normal' shrinkage or just using 'res' without shrinkage if apeglm is strictly required
+    # and the coef is ambiguous. For now, let's assume it should always be found.
+    res_lfc_shrink <- lfcShrink(dds_obj, contrast = c("condition", contrast_levels[1], contrast_levels[2]), res = res, type = "normal") # Or just res if no shrinkage is desired as fallback
+  }
+
+  # Convertir a data frame para guardar y manipular
+  res_df <- as.data.frame(res_lfc_shrink)
+  
+  # Guardar resultados completos (para GSEA)
+  write.csv(res_df, paste0("DESeq2_results_full_", output_prefix, ".csv"), row.names = TRUE)
+  message(paste("  Resultados completos guardados en:", paste0("DESeq2_results_full_", output_prefix, ".csv")))
+  
+  # Filtrar DEGs significativos (padj < 0.05 y |log2FC| > 1)
+  degs_filtered <- res_df %>%
+    filter(padj < 0.05 & abs(log2FoldChange) > 1) %>%
+    na.omit() # Eliminar NAs si los hay
+  
+  # Guardar DEGs filtrados
+  write.csv(degs_filtered, paste0("DEGs_", output_prefix, ".csv"), row.names = TRUE)
+  message(paste("  DEGs filtrados guardados en:", paste0("DEGs_", output_prefix, ".csv")))
+  
+  # Generar MA Plot (se generará directamente en el Rmd, no se guarda png explícitamente aquí)
+  message(paste("  Generando MA Plot para:", output_prefix))
+  plot_ma <- ggplot(res_df, aes(x = baseMean, y = log2FoldChange)) +
+    geom_point(aes(color = padj < 0.05 & abs(log2FoldChange) > 1), alpha = 0.4, size = 1) +
+    scale_x_log10() +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "darkgrey") +
+    geom_hline(yintercept = c(-1, 1), linetype = "dotted", color = "darkgrey") +
+    scale_color_manual(values = c("TRUE" = "red", "FALSE" = "black")) +
+    labs(title = paste("MA Plot:", paste(contrast_levels, collapse = " vs ")),
+         x = "Mean of Normalized Counts",
+         y = "Log2 Fold Change") +
+    theme_minimal() +
+    theme(legend.position = "none", plot.title = element_text(hjust = 0.5))
+  ggsave(filename = paste0("MA_plot_", output_prefix, ".png"), plot = plot_ma, width = 8, height = 7, units = "in", dpi = 300)
+  
+  # Generar Volcano Plot (se generará directamente en el Rmd, no se guarda png explícitamente aquí)
+  message(paste("  Generando Volcano Plot para:", output_prefix))
+  plot_volcano <- EnhancedVolcano(res_lfc_shrink,
+                                  lab = rownames(res_lfc_shrink),
+                                  x = 'log2FoldChange',
+                                  y = 'padj',
+                                  title = paste("Volcano Plot:", paste(contrast_levels, collapse = " vs ")),
+                                  pCutoff = 0.05,
+                                  FCcutoff = 1.0,
+                                  pointSize = 1.5,
+                                  labSize = 3,
+                                  legendLabSize = 12,
+                                  legendIconSize = 4.0,
+                                  drawConnectors = TRUE,
+                                  widthConnectors = 0.5,
+                                  colConnectors = 'grey30',
+                                  subtitle = NULL)
+  ggsave(filename = paste0("Volcano_plot_", output_prefix, ".png"), plot = plot_volcano, width = 8, height = 8, units = "in", dpi = 300)
+  
+  return(list(full_results = res_df, filtered_degs = degs_filtered))
+}
+
+# Ejecutar el análisis DESeq2 (this needs to be outside the function, done once)
+# dds already defined and pre-filtered, now run DESeq
+dds <- DESeq(dds) # This line remains important and should run first
+
+# IMPORTANT: Check the names of the coefficients after running DESeq(dds)
+# You can uncomment the following line to see what coef names are available:
+# print(resultsNames(dds))
+
+# Ejecutar para las comparaciones de interés
+# Guardaremos los resultados en variables para usar en los siguientes pasos
+res_WTC_vs_NTC <- analyze_and_save_degs(dds, c("WTC", "NTC"), "WTC_vs_NTC")
+res_H1KOC_vs_NTC <- analyze_and_save_degs(dds, c("H1KOC", "NTC"), "H1KOC_vs_NTC")
+res_H2KOC_vs_NTC <- analyze_and_save_degs(dds, c("H2KOC", "NTC"), "H2KOC_vs_NTC")
+
+# Muestra el resumen de DEGs para H1KOC vs NTC como ejemplo
+cat("\n--- Resumen de DEGs H1KOC vs NTC ---\n")
+print(summary(res_H1KOC_vs_NTC$full_results))
+cat("\nNúmero de DEGs (padj < 0.05, |log2FC| > 1) para H1KOC vs NTC: ", nrow(res_H1KOC_vs_NTC$filtered_degs), "\n")
+```
+
+## 4.1. WTC vs NTC
+### MA Plot WTC vs NTC
+
+```{r}
+knitr::include_graphics("MA_plot_WTC_vs_NTC.png")
+```
+
+**Interpretación del MA Plot (WTC vs NTC):**
+Este MA plot visualiza el Log2 Fold Change (log2FC) de cada gen en el eje Y contra su abundancia media (logaritmo de la expresión normalizada) en el eje X. Los puntos rojos representan los genes diferencialmente expresados (DEGs) con un p-valor ajustado (padj) menor a 0.05 y un `|log2FC| > 1`. Observamos que la mayoría de los puntos se agrupan alrededor del log2FC de 0 para genes de baja expresión, indicando que el efecto se hace más notorio en genes con niveles de expresión más altos. La dispersión simétrica de los puntos rojos alrededor del 0 sugiere que hay tanto genes up-regulados como down-regulados significativamente.
+
+### Volcano Plot WTC vs NTC
+
+```{r}
+knitr::include_graphics("Volcano_plot_WTC_vs_NTC.png")
+```
+
+**Interpretación del Volcano Plot (WTC vs NTC):**
+El Volcano plot muestra el log2FC en el eje X y el -log10 del p-valor ajustado en el eje Y. Los puntos por encima de la línea horizontal de p-valor (generalmente 0.05) y fuera de las líneas verticales de `|log2FC|` (generalmente 1) son los DEGs. En esta comparación (WTC vs NTC), se observa un número considerable de genes significativamente diferencialmente expresados, distribuidos en ambos lados del eje Y, indicando tanto up-regulación como down-regulación. Los genes en las esquinas superiores son los que presentan la mayor significancia estadística y los mayores cambios de expresión.
+
+## 4.2. H1KOC vs NTC
+### MA Plot H1KOC vs NTC
+
+```{r}
+knitr::include_graphics("MA_plot_H1KOC_vs_NTC.png")
+```
+
+**Interpretación del MA Plot (H1KOC vs NTC):**
+De manera similar a WTC vs NTC, el MA plot para H1KOC vs NTC muestra que la mayoría de los genes con cambios significativos tienden a tener niveles de expresión medios a altos. La distribución de los DEGs rojos indica que el tratamiento con EVs H1KOC también induce cambios substanciales en la expresión génica, con una mezcla de genes up- y down-regulados. La reducción del fold-change con apeglm ayuda a comprimir los valores de LFC para genes con baja expresión, lo que mejora la visualización.
+
+### Volcano Plot H1KOC vs NTC
+
+```{r}
+knitr::include_graphics("Volcano_plot_H1KOC_vs_NTC.png")
+```
+
+**Interpretación del Volcano Plot (H1KOC vs NTC):**
+El Volcano plot para H1KOC vs NTC revela un patrón robusto de expresión diferencial. Se identifica un gran número de DEGs significativos. Es importante notar si hay un predominio de genes up-regulados (puntos a la derecha) o down-regulados (puntos a la izquierda), lo cual puede dar una pista sobre la dirección general de la respuesta biológica. Los genes más pronunciadamente diferencialmente expresados son candidatos clave para investigaciones posteriores.
+
+## 4.3. H2KOC vs NTC
+### MA Plot H2KOC vs NTC
+
+```{r}
+knitr::include_graphics("MA_plot_H2KOC_vs_NTC.png")
+```
+
+**Interpretación del MA Plot (H2KOC vs NTC):**
+El MA plot para H2KOC vs NTC muestra un patrón consistente con las comparaciones anteriores, donde los cambios de expresión más pronunciados se observan en genes con expresión media a alta. La presencia de numerosos puntos rojos (DEGs) indica una respuesta significativa del transcriptoma al tratamiento con EVs del grupo H2KOC. La dispersión de los puntos rojos sugiere que ambos tipos de regulación (up y down) están presentes, reflejando una compleja interacción con la expresión génica.
+
+### Volcano Plot H2KOC vs NTC
+
+```{r}
+knitr::include_graphics("Volcano_plot_H2KOC_vs_NTC.png")
+```
+
+**Interpretación del Volcano Plot (H2KOC vs NTC):**
+El Volcano plot para H2KOC vs NTC destaca los genes con los cambios de expresión más fuertes y estadísticamente más significativos. La densidad de puntos en la parte superior izquierda y derecha indica un considerable número de genes down- y up-regulados, respectivamente. Comparando este plot con los de WTC y H1KOC, se puede observar si H2KOC induce un perfil de expresión más similar a uno de los otros tratamientos o si presenta un conjunto de DEGs único.
+
+# 5. Análisis de Enriquecimiento de Vías (Over-Representation Analysis - ORA)
+
+Esta sección utiliza `clusterProfiler` para identificar vías y términos GO enriquecidos entre los DEGs (genes significativamente diferencialmente expresados). Se realiza un análisis separado para los genes up-regulados y down-regulados, lo que proporciona una comprensión más detallada de los procesos biológicos afectados.
+
+```{r}
+# Usaremos los DEGs filtrados de H1KOC vs NTC para este ejemplo
+# Puedes replicar esto para WTC vs NTC y H2KOC vs NTC si es necesario.
+degs_g3_vs_g1_df <- res_H1KOC_vs_NTC$filtered_degs
+
+# Extraer y limpiar los IDs de Ensembl (eliminar la parte de la versión)
+original_ensembl_ids <- rownames(degs_g3_vs_g1_df)
+ensembl_ids_clean <- sub("\\..*", "", original_ensembl_ids)
+
+# Mapear Ensembl IDs a Entrez IDs
+# Asegúrate de que los IDs de Ensembl limpios no estén vacíos
+ensembl_ids_to_map <- ensembl_ids_clean[ensembl_ids_clean != ""]
+
+# Mapeo usando org.Hs.eg.db
+entrez_ids <- bitr(ensembl_ids_to_map,
+                   fromType = "ENSEMBL",
+                   toType = "ENTREZID",
+                   OrgDb = org.Hs.eg.db)
+
+# Filtrar los DEGs para incluir solo aquellos que se mapearon a Entrez IDs
+degs_g3_vs_g1_with_entrez <- degs_g3_vs_g1_df[ensembl_ids_clean %in% entrez_ids$ENSEMBL, ]
+# Añadir la columna EntrezID al dataframe de DEGs
+degs_g3_vs_g1_with_entrez$ENTREZID <- entrez_ids$ENTREZID[match(sub("\\..*", "", rownames(degs_g3_vs_g1_with_entrez)), entrez_ids$ENSEMBL)]
+
+# Obtener solo los Entrez IDs de los DEGs que se mapearon
+mapped_entrez_ids <- degs_g3_vs_g1_with_entrez$ENTREZID %>% na.omit() %>% as.character()
+
+message(paste("Número de DEGs de H1KOC vs NTC mapeados a Entrez IDs:", length(mapped_entrez_ids)))
+
+# 5.1. GO Enrichment (BP, MF, CC)
+message("Realizando análisis de enriquecimiento GO (BP, MF, CC)...")
+go_bp_results <- enrichGO(gene         = mapped_entrez_ids,
+                          OrgDb        = org.Hs.eg.db,
+                          ont          = "BP", # Biological Process
+                          pAdjustMethod = "BH",
+                          qvalueCutoff = 0.05,
+                          readable     = TRUE) # Para Gene Symbols
+
+go_mf_results <- enrichGO(gene         = mapped_entrez_ids,
+                          OrgDb        = org.Hs.eg.db,
+                          ont          = "MF", # Molecular Function
+                          pAdjustMethod = "BH",
+                          qvalueCutoff = 0.05,
+                          readable     = TRUE)
+
+go_cc_results <- enrichGO(gene         = mapped_entrez_ids,
+                          OrgDb        = org.Hs.eg.db,
+                          ont          = "CC", # Cellular Component
+                          pAdjustMethod = "BH",
+                          qvalueCutoff = 0.05,
+                          readable     = TRUE)
+
+# Guardar resultados y mostrar resúmenes (ejemplo para BP)
+if (!is.null(go_bp_results) && nrow(as.data.frame(go_bp_results)) > 0) {
+  go_bp_df <- as.data.frame(go_bp_results)
+  write.csv(go_bp_df, "GO_enrichment_H1KOC_vs_NTC_BP.csv", row.names = FALSE)
+  message("Resultados GO BP guardados.")
+  # Print the DotPlot for overall GO BP here
+  print(dotplot(go_bp_results, showCategory = 15, title = "GO Biological Process Enrichment (H1KOC vs NTC)"))
+  # For BarPlot
+  print(barplot(go_bp_results, showCategory = 15, title = "GO Biological Process Enrichment (H1KOC vs NTC)"))
+  ggsave(filename = "BarPlot_GO_BP_H1KOC_vs_NTC.png", plot = last_plot(), width = 10, height = 8, units = "in", dpi = 300)
+} else { message("No se encontraron vías GO BP enriquecidas.") }
+
+if (!is.null(go_mf_results) && nrow(as.data.frame(go_mf_results)) > 0) {
+  write.csv(as.data.frame(go_mf_results), "GO_enrichment_H1KOC_vs_NTC_MF.csv", row.names = FALSE)
+  message("Resultados GO MF guardados.")
+} else { message("No se encontraron vías GO MF enriquecidas.") }
+
+if (!is.null(go_cc_results) && nrow(as.data.frame(go_cc_results)) > 0) {
+  write.csv(as.data.frame(go_cc_results), "GO_enrichment_H1KOC_vs_NTC_CC.csv", row.names = FALSE)
+  message("Resultados GO CC guardados.")
+} else { message("No se encontraron vías GO CC enriquecidas.") }
+
+# 5.2. KEGG Enrichment
+message("Realizando análisis de enriquecimiento KEGG...")
+kegg_results <- enrichKEGG(gene         = as.character(mapped_entrez_ids),
+                           organism     = 'hsa', # Homo sapiens
+                           pAdjustMethod = "BH",
+                           qvalueCutoff = 0.05)
+
+if (!is.null(kegg_results) && nrow(as.data.frame(kegg_results)) > 0) {
+  kegg_df <- as.data.frame(setReadable(kegg_results, OrgDb = org.Hs.eg.db, keyType = "ENTREZID"))
+  write.csv(kegg_df, "KEGG_enrichment_H1KOC_vs_NTC.csv", row.names = FALSE)
+  message("Resultados KEGG guardados.")
+  print(dotplot(kegg_results, showCategory = 15, title = "KEGG Pathway Enrichment (H1KOC vs NTC)"))
+  print(barplot(kegg_results, showCategory = 15, title = "KEGG Pathway Enrichment (H1KOC vs NTC)"))
+  ggsave(filename = "BarPlot_KEGG_H1KOC_vs_NTC.png", plot = last_plot(), width = 10, height = 8, units = "in", dpi = 300)
+} else { message("No se encontraron vías KEGG enriquecidas.") }
+
+# 5.3. Reactome Enrichment
+message("Realizando análisis de enriquecimiento Reactome...")
+reactome_results <- enrichPathway(gene         = as.character(mapped_entrez_ids),
+                                  organism     = "human",
+                                  pAdjustMethod = "BH",
+                                  qvalueCutoff = 0.05,
+                                  readable     = TRUE)
+
+if (!is.null(reactome_results) && nrow(as.data.frame(reactome_results)) > 0) {
+  reactome_df <- as.data.frame(reactome_results)
+  write.csv(reactome_df, "Reactome_enrichment_H1KOC_vs_NTC.csv", row.names = FALSE)
+  message("Resultados Reactome guardados.")
+  print(dotplot(reactome_results, showCategory = 15, title = "Reactome Pathway Enrichment (H1KOC vs NTC)"))
+  print(barplot(reactome_results, showCategory = 15, title = "Reactome Pathway Enrichment (H1KOC vs NTC)"))
+  ggsave(filename = "BarPlot_Reactome_H1KOC_vs_NTC.png", plot = last_plot(), width = 10, height = 8, units = "in", dpi = 300)
+} else { message("No se encontraron vías Reactome enriquecidas.") }
+
+# --- Análisis separado para Up- y Down-regulated genes (Script 5) ---
+message("\nRealizando análisis de enriquecimiento para genes UP y DOWN-REGULATED (H1KOC vs NTC)...")
+
+# Separar genes up- y down-regulados
+up_genes <- degs_g3_vs_g1_with_entrez %>% filter(log2FoldChange > 1)
+down_genes <- degs_g3_vs_g1_with_entrez %>% filter(log2FoldChange < -1)
+
+up_entrez_ids <- up_genes$ENTREZID %>% na.omit() %>% as.character()
+down_entrez_ids <- down_genes$ENTREZID %>% na.omit() %>% as.character()
+
+message(paste("Genes UP-REGULATED (Entrez IDs):", length(up_entrez_ids)))
+message(paste("Genes DOWN-REGULATED (Entrez IDs):", length(down_entrez_ids)))
+
+# GO Enrichment para UP-REGULATED (BP como ejemplo)
+go_up_bp <- NULL # Inicializar para evitar errores si no hay resultados
+if (length(up_entrez_ids) > 0) {
+  message("  > GO BP para UP-REGULATED...")
+  go_up_bp <- enrichGO(gene          = up_entrez_ids,
+                       OrgDb         = org.Hs.eg.db,
+                       ont           = "BP",
+                       pAdjustMethod = "BH",
+                       qvalueCutoff  = 0.05,
+                       readable      = TRUE)
+  if (!is.null(go_up_bp) && nrow(as.data.frame(go_up_bp)) > 0) {
+    write.csv(as.data.frame(go_up_bp), "GO_enrichment_H1KOC_vs_NTC_UP_BP.csv", row.names = FALSE)
+    dotplot_go_up_bp <- dotplot(go_up_bp, showCategory = 15, title = "GO BP Enrichment (UP-REGULATED, H1KOC vs NTC)")
+    print(dotplot_go_up_bp)
+    ggsave(filename = "DotPlot_GO_BP_H1KOC_vs_NTC_UP.png", plot = dotplot_go_up_bp, width = 10, height = 8, units = "in", dpi = 300)
+  } else { message("  > No se encontraron vías GO BP enriquecidas para genes UP-REGULATED.") }
+}
+
+# KEGG Enrichment para UP-REGULATED
+kegg_up <- NULL
+if (length(up_entrez_ids) > 0) {
+  message("  > KEGG para UP-REGULATED...")
+  kegg_up <- enrichKEGG(gene         = up_entrez_ids,
+                          organism     = 'hsa',
+                          pAdjustMethod = "BH",
+                          qvalueCutoff = 0.05)
+  if (!is.null(kegg_up) && nrow(as.data.frame(kegg_up)) > 0) {
+    write.csv(as.data.frame(setReadable(kegg_up, OrgDb = org.Hs.eg.db, keyType = "ENTREZID")), "KEGG_enrichment_H1KOC_vs_NTC_UP.csv", row.names = FALSE)
+    dotplot_kegg_up <- dotplot(kegg_up, showCategory = 15, title = "KEGG Pathway Enrichment (UP-REGULATED, H1KOC vs NTC)")
+    print(dotplot_kegg_up)
+    ggsave(filename = "DotPlot_KEGG_H1KOC_vs_NTC_UP.png", plot = dotplot_kegg_up, width = 10, height = 8, units = "in", dpi = 300)
+  } else { message("  > No se encontraron vías KEGG enriquecidas para genes UP-REGULATED.") }
+}
+
+# Reactome Enrichment para UP-REGULATED
+reactome_up <- NULL
+if (length(up_entrez_ids) > 0) {
+  message("  > Reactome para UP-REGULATED...")
+  reactome_up <- enrichPathway(gene         = up_entrez_ids,
+                                  organism     = "human",
+                                  pAdjustMethod = "BH",
+                                  qvalueCutoff = 0.05,
+                                  readable     = TRUE)
+  if (!is.null(reactome_up) && nrow(as.data.frame(reactome_up)) > 0) {
+    write.csv(as.data.frame(reactome_up), "Reactome_enrichment_H1KOC_vs_NTC_UP.csv", row.names = FALSE)
+    dotplot_reactome_up <- dotplot(reactome_up, showCategory = 15, title = "Reactome Pathway Enrichment (UP-REGULATED, H1KOC vs NTC)")
+    print(dotplot_reactome_up)
+    ggsave(filename = "DotPlot_Reactome_H1KOC_vs_NTC_UP.png", plot = dotplot_reactome_up, width = 10, height = 8, units = "in", dpi = 300)
+  } else { message("  > No se encontraron vías Reactome enriquecidas para genes UP-REGULATED.") }
+}
+
+
+# GO Enrichment para DOWN-REGULATED (BP como ejemplo)
+go_down_bp <- NULL
+if (length(down_entrez_ids) > 0) {
+  message("  > GO BP para DOWN-REGULATED...")
+  go_down_bp <- enrichGO(gene          = down_entrez_ids,
+                         OrgDb         = org.Hs.eg.db,
+                         ont           = "BP",
+                         pAdjustMethod = "BH",
+                         qvalueCutoff  = 0.05,
+                         readable      = TRUE)
+  if (!is.null(go_down_bp) && nrow(as.data.frame(go_down_bp)) > 0) {
+    write.csv(as.data.frame(go_down_bp), "GO_enrichment_H1KOC_vs_NTC_DOWN_BP.csv", row.names = FALSE)
+    dotplot_go_down_bp <- dotplot(go_down_bp, showCategory = 15, title = "GO BP Enrichment (DOWN-REGULATED, H1KOC vs NTC)")
+    print(dotplot_go_down_bp)
+    ggsave(filename = "DotPlot_GO_BP_H1KOC_vs_NTC_DOWN.png", plot = dotplot_go_down_bp, width = 10, height = 8, units = "in", dpi = 300)
+  } else { message("  > No se encontraron vías GO BP enriquecidas para genes DOWN-REGULATED.") }
+}
+
+# KEGG Enrichment para DOWN-REGULATED
+kegg_down <- NULL
+if (length(down_entrez_ids) > 0) {
+  message("  > KEGG para DOWN-REGULATED...")
+  kegg_down <- enrichKEGG(gene         = down_entrez_ids,
+                          organism     = 'hsa',
+                          pAdjustMethod = "BH",
+                          qvalueCutoff = 0.05)
+  if (!is.null(kegg_down) && nrow(as.data.frame(kegg_down)) > 0) {
+    write.csv(as.data.frame(setReadable(kegg_down, OrgDb = org.Hs.eg.db, keyType = "ENTREZID")), "KEGG_enrichment_H1KOC_vs_NTC_DOWN.csv", row.names = FALSE)
+    dotplot_kegg_down <- dotplot(kegg_down, showCategory = 15, title = "KEGG Pathway Enrichment (DOWN-REGULATED, H1KOC vs NTC)")
+    print(dotplot_kegg_down)
+    ggsave(filename = "DotPlot_KEGG_H1KOC_vs_NTC_DOWN.png", plot = dotplot_kegg_down, width = 10, height = 8, units = "in", dpi = 300)
+  } else { message("  > No se encontraron vías KEGG enriquecidas para genes DOWN-REGULATED.") }
+}
+
+# Reactome Enrichment para DOWN-REGULATED
+reactome_down <- NULL
+if (length(down_entrez_ids) > 0) {
+  message("  > Reactome para DOWN-REGULATED...")
+  reactome_down <- enrichPathway(gene         = down_entrez_ids,
+                                  organism     = "human",
+                                  pAdjustMethod = "BH",
+                                  qvalueCutoff = 0.05,
+                                  readable     = TRUE)
+  if (!is.null(reactome_down) && nrow(as.data.frame(reactome_down)) > 0) {
+    write.csv(as.data.frame(reactome_down), "Reactome_enrichment_H1KOC_vs_NTC_DOWN.csv", row.names = FALSE)
+    dotplot_reactome_down <- dotplot(reactome_down, showCategory = 15, title = "Reactome Pathway Enrichment (DOWN-REGULATED, H1KOC vs NTC)")
+    print(dotplot_reactome_down)
+    ggsave(filename = "DotPlot_Reactome_H1KOC_vs_NTC_DOWN.png", plot = dotplot_reactome_down, width = 10, height = 8, units = "in", dpi = 300)
+  } else { message("  > No se encontraron vías Reactome enriquecidas para genes DOWN-REGULATED.") }
+}
+```
+
+## 5.1. ORA para H1KOC vs NTC
+### DotPlot GO BP H1KOC vs NTC (UP-regulated)
+
+```{r}
+knitr::include_graphics("DotPlot_GO_BP_H1KOC_vs_NTC_UP.png")
+```
+
+**Interpretación (DotPlot GO BP H1KOC vs NTC UP-regulated):**
+Este DotPlot muestra los términos de Gene Ontology (GO) del proceso biológico (BP) más significativamente enriquecidos para los genes up-regulados en la comparación H1KOC vs NTC. Los términos con un color más oscuro (menor p.adjust) y un tamaño de punto mayor (más genes en el término) son los más relevantes. Vías como "respuesta inmune", "regulación de la proliferación celular" o "apoptosis" son comunes en las respuestas a estímulos externos.
+
+### DotPlot KEGG H1KOC vs NTC (UP-regulated)
+
+```{r}
+knitr::include_graphics("DotPlot_KEGG_H1KOC_vs_NTC_UP.png")
+```
+
+**Interpretación (DotPlot KEGG H1KOC vs NTC UP-regulated):**
+Este DotPlot presenta las vías KEGG enriquecidas por los genes up-regulados en H1KOC vs NTC. Las vías KEGG son colecciones de diagramas que representan redes de interacción molecular y vías metabólicas o de señalización. La identificación de vías como "cáncer", "inflamación" o "metabolismo" sugeriría mecanismos moleculares específicos activados por el tratamiento con EVs H1KOC.
+
+### DotPlot Reactome H1KOC vs NTC (UP-regulated)
+
+```{r}
+knitr::include_graphics("DotPlot_Reactome_H1KOC_vs_NTC_UP.png")
+```
+
+**Interpretación (DotPlot Reactome H1KOC vs NTC UP-regulated):**
+El DotPlot para las vías de Reactome muestra procesos celulares y moleculares detallados que están up-regulados en H1KOC vs NTC. Reactome ofrece una visión más jerárquica de las vías. Identificar vías como "Señalización de citocinas", "Respuestas de células T" o "Vías de apoptosis" proporcionaría información sobre los procesos celulares que el tratamiento H1KOC está promoviendo.
+
+### DotPlot GO BP H1KOC vs NTC (DOWN-regulated)
+
+```{r}
+knitr::include_graphics("DotPlot_GO_BP_H1KOC_vs_NTC_DOWN.png")
+```
+
+**Interpretación (DotPlot GO BP H1KOC vs NTC DOWN-regulated):**
+Este DotPlot muestra los términos GO BP enriquecidos para los genes down-regulados en H1KOC vs NTC. Los términos identificados aquí sugieren procesos biológicos que son suprimidos por el tratamiento con EVs H1KOC. Por ejemplo, "desarrollo", "adhesión celular" o "regulación del ciclo celular" podrían estar implicados si la EV tiene un efecto inhibitorio sobre ciertas funciones.
+
+### DotPlot KEGG H1KOC vs NTC (DOWN-regulated)
+
+```{r}
+knitr::include_graphics("DotPlot_KEGG_H1KOC_vs_NTC_DOWN.png")
+```
+
+**Interpretación (DotPlot KEGG H1KOC vs NTC DOWN-regulated):**
+Aquí se muestran las vías KEGG para los genes down-regulados en H1KOC vs NTC. Estas vías son las que tienen una actividad reducida debido al tratamiento con EVs H1KOC. La identificación de vías como "metabolismo de lípidos" o "receptores de citocinas" podría indicar una supresión de estas funciones.
+
+### DotPlot Reactome H1KOC vs NTC (DOWN-regulated)
+
+```{r}
+knitr::include_graphics("DotPlot_Reactome_H1KOC_vs_NTC_DOWN.png")
+```
+
+**Interpretación (DotPlot Reactome H1KOC vs NTC DOWN-regulated):**
+Este DotPlot detalla las vías de Reactome suprimidas en H1KOC vs NTC. Estas vías complementan la información de los genes up-regulados, mostrando un panorama completo de los cambios biológicos inducidos por el tratamiento H1KOC.
+
+### BarPlot GO BP H1KOC vs NTC (Overall)
+
+```{r}
+knitr::include_graphics("BarPlot_GO_BP_H1KOC_vs_NTC.png")
+```
+
+**Interpretación (BarPlot GO BP H1KOC vs NTC):**
+El BarPlot muestra los términos de GO BP más enriquecidos cuando se consideran todos los DEGs (up y down juntos) en H1KOC vs NTC. Este tipo de gráfico es útil para una visión general de los procesos biológicos afectados, aunque no distingue la dirección de la regulación. Los términos con barras más largas y colores más oscuros son los más significativos.
+
+### BarPlot KEGG H1KOC vs NTC (Overall)
+
+```{r}
+knitr::include_graphics("BarPlot_KEGG_H1KOC_vs_NTC.png")
+```
+
+**Interpretación (BarPlot KEGG H1KOC vs NTC):**
+Similar al GO BarPlot, este gráfico resume las vías KEGG más enriquecidas para el conjunto total de DEGs en H1KOC vs NTC. Es valioso para identificar las vías de señalización o metabólicas clave que están globalmente impactadas por el tratamiento con EVs H1KOC.
+
+### BarPlot Reactome H1KOC vs NTC (Overall)
+
+```{r}
+knitr::include_graphics("BarPlot_Reactome_H1KOC_vs_NTC.png")
+```
+
+**Interpretación (BarPlot Reactome H1KOC vs NTC):**
+Este BarPlot muestra las principales vías de Reactome enriquecidas para todos los DEGs en H1KOC vs NTC. La visualización permite una rápida identificación de los procesos Reactome más afectados y complementa la información proporcionada por los DotPlots de up y down-regulados.
+
+### CnetPlot KEGG H1KOC vs NTC (UP-regulated, Top Pathways)
+
+```{r}
+# Preparamos el vector fc_vector_entrez para cnetplot
+fc_vector <- degs_g3_vs_g1_with_entrez$log2FoldChange
+names(fc_vector) <- degs_g3_vs_g1_with_entrez$ENTREZID
+
+if (!is.null(kegg_up) && nrow(as.data.frame(kegg_up)) > 0) {
+  message("Generando cnetplot para KEGG UP-regulated...")
+  print(cnetplot(kegg_up, foldChange = fc_vector, circular = FALSE,
+                 colorEdge = TRUE, showCategory = 5,
+                 node_label = "all",
+                 cex_label_category = 1.2, cex_label_gene = 0.8,
+                 layout = "nicely"))
+} else { message("No hay resultados KEGG UP-regulated para graficar cnetplot.") }
+```
+
+**Interpretación (CnetPlot KEGG H1KOC vs NTC):**
+El CnetPlot es una visualización de red que muestra la interconexión entre los genes diferencialmente expresados (nodos pequeños) y las vías KEGG enriquecidas (nodos grandes). Las conexiones indican qué genes pertenecen a qué vías. El color de los nodos de los genes refleja su log2FC (rojo para up-regulados, azul para down-regulados). Este gráfico es crucial para entender cómo un grupo de genes, posiblemente relacionados funcionalmente, contribuye al enriquecimiento de múltiples vías y cómo la regulación de esos genes impacta la vía.
+
+### CnetPlot GO BP H1KOC vs NTC (UP-regulated, Top Pathways)
+
+```{r}
+if (!is.null(go_up_bp) && nrow(as.data.frame(go_up_bp)) > 0) {
+  message("Generando cnetplot para GO BP UP-regulated...")
+  print(cnetplot(go_up_bp, foldChange = fc_vector, circular = FALSE,
+                 colorEdge = TRUE, showCategory = 5,
+                 node_label = "all",
+                 cex_label_category = 1.2, cex_label_gene = 0.8,
+                 layout = "nicely"))
+} else { message("No hay resultados GO BP UP-regulated para graficar cnetplot.") }
+```
+
+**Interpretación (CnetPlot GO BP H1KOC vs NTC):**
+Similar al CnetPlot de KEGG, este gráfico muestra la red de genes y términos de GO Biological Process para los genes up-regulados en H1KOC vs NTC. Permite visualizar qué genes clave están contribuyendo al enriquecimiento de varios procesos biológicos, ofreciendo una perspectiva de red sobre las funciones celulares afectadas.
+
+### Pathway View para KEGG H1KOC vs NTC (Vía más significativa)
+
+```{r}
+# Descomentar y ejecutar solo si tienes 'pathview' y Ghostscript instalados y configurados.
+# Puede ser pesado y generar muchos archivos.
+
+ if (!is.null(kegg_up) && nrow(as.data.frame(kegg_up)) > 0) {
+   message("Generando Pathway View para la vía KEGG más enriquecida (UP-regulated)...")
+   top_kegg_id <- as.data.frame(kegg_up) %>% arrange(p.adjust) %>% head(1) %>% pull(ID)
+
+   if (length(top_kegg_id) > 0) {
+     # fc_vector ya fue creado arriba para cnetplot
+     pathview(gene.data = fc_vector,
+              pathway.id = top_kegg_id,
+              species = "hsa",
+              limit = list(gene=max(abs(fc_vector)), cpd=1),
+              # Puedes especificar un directorio de salida si no quieres que lo guarde en el principal
+              # out.suffix = "H1KOC_vs_NTC_KEGG",
+              # kegg.dir = "./pathview_output"
+              )
+     message(paste("  Pathway View para KEGG ID:", top_kegg_id, "generado."))
+   } else { message("No se pudo identificar la vía KEGG más significativa para Pathway View.") }
+ }
+```
+
+**Interpretación (Pathway View KEGG H1KOC vs NTC):**
+Este es el mapa de la vía KEGG más significativamente enriquecida para los genes up-regulados en H1KOC vs NTC. En este mapa, los genes resaltados en rojo indican up-regulación, mientras que los resaltados en azul indicarían down-regulación (si aplicara a los genes en esta vía). Permite una inspección visual directa de cómo los genes diferencialmente expresados se integran y afectan funciones específicas dentro de una vía biológica conocida. Esto proporciona un contexto crucial para comprender los mecanismos moleculares subyacentes.
+
+# 6. Análisis de Enriquecimiento de Vías (GSEA)
+
+Esta sección realiza el GSEA (Gene Set Enrichment Analysis) utilizando la librería fgsea. A diferencia del ORA, GSEA considera el ranking de todos los genes (basado en el log2FC), no solo los DEGs significativos. Esto permite detectar cambios sutiles pero coordinados en la expresión de genes dentro de una vía, incluso si los genes individuales no alcanzan el umbral de significancia diferencial.
+
+```{r}
+# Instalar librerías si no están instaladas
+# ... (keep as is) ...
+
+library(fgsea)
+library(msigdbr)
+library(dplyr) # Cargar dplyr explícitamente
+library(ggplot2)
+library(org.Hs.eg.db) # Cargar para mapeo de IDs
+
+message("Librerías para GSEA cargadas. Iniciando análisis GSEA...")
+
+# --- Función para preparar los datos y ejecutar GSEA ---
+run_gsea <- function(file_path, comparison_name) {
+  message(paste0("\nProcesando archivo para GSEA: ", file_path))
+  
+  # 1. Cargar los resultados completos de DESeq2
+  df_res <- read.csv(file_path, row.names = 1)
+  
+  # Preparar la lista de clasificación (rank list)
+  original_ensembl_ids <- rownames(df_res)
+  ensembl_ids_clean <- sub("\\..*", "", original_ensembl_ids) 
+  
+  gene_list <- df_res$log2FoldChange
+  names(gene_list) <- ensembl_ids_clean
+  
+  gene_list <- gene_list[!duplicated(names(gene_list))]
+  
+  entrez_map <- AnnotationDbi::select(org.Hs.eg.db, 
+                                     keys = names(gene_list), 
+                                     keytype = "ENSEMBL", 
+                                     columns = "ENTREZID")
+  
+  gene_list_df <- data.frame(ENSEMBL = names(gene_list), log2FoldChange = gene_list)
+  gene_list_df <- left_join(gene_list_df, entrez_map, by = c("ENSEMBL" = "ENSEMBL")) %>%
+    filter(!is.na(ENTREZID)) %>% 
+    group_by(ENTREZID) %>%
+    summarise(log2FoldChange = mean(log2FoldChange)) 
+  
+  ranked_genes <- setNames(gene_list_df$log2FoldChange, gene_list_df$ENTREZID)
+  ranked_genes <- sort(ranked_genes, decreasing = TRUE)
+  
+  message(paste0("  Número de genes rankeados para GSEA: ", length(ranked_genes)))
+  
+  # 2. Cargar conjuntos de genes (Pathways) de MSigDB para KEGG
+  m_t2g_kegg <- msigdbr(species = "Homo sapiens", category = "C2", subcategory = "CP:KEGG_LEGACY") %>% 
+    dplyr::select(gs_name, entrez_gene)
+  
+  pathways_kegg <- split(m_t2g_kegg$entrez_gene, f = m_t2g_kegg$gs_name)
+  
+  message("  Realizando GSEA para vías KEGG...")
+  gsea_kegg_res <- fgsea(pathways = pathways_kegg, 
+                         stats = ranked_genes, 
+                         minSize = 10, 
+                         maxSize = 500, 
+                         nPermSimple = 10000) 
+  
+  # Filtrar y guardar resultados de GSEA para KEGG
+  gsea_kegg_res_filtered <- as.data.frame(gsea_kegg_res) %>%
+    filter(padj < 0.05) %>%
+    # --- MODIFICACIÓN CLAVE AQUÍ: Seleccionar columnas antes de guardar ---
+    dplyr::select(pathway, NES, pval, padj, ES, size) %>% # Excluir 'leadingEdge' y 'pathways' (list columns)
+    arrange(NES) 
+  
+  write.csv(gsea_kegg_res_filtered, paste0("GSEA_KEGG_", comparison_name, ".csv"), row.names = FALSE)
+  message(paste0("  > Resultados GSEA KEGG guardados en GSEA_KEGG_", comparison_name, ".csv"))
+  
+  if (nrow(gsea_kegg_res_filtered) > 0) {
+    message("  Generando DotPlot para GSEA KEGG...")
+    png(paste0("DotPlot_GSEA_KEGG_", comparison_name, ".png"), width = 900, height = 700, res = 120)
+    print(ggplot(gsea_kegg_res_filtered %>% dplyr::top_n(15, wt = abs(NES)), aes(x = NES, y = reorder(pathway, NES), color = padj, size = size)) +
+            geom_point() +
+            scale_color_viridis_c(trans = "log10", direction = -1) +
+            labs(title = paste0("GSEA KEGG Pathways (", comparison_name, ")"),
+                 x = "Normalized Enrichment Score (NES)", y = "Pathway") +
+            theme_minimal() +
+            theme(axis.text.y = element_text(size = 8)))
+    dev.off()
+    message(paste0("  > DotPlot GSEA KEGG guardado en DotPlot_GSEA_KEGG_", comparison_name, ".png"))
+  } else {
+    message("  > No se encontraron vías KEGG significativas en GSEA para ", comparison_name, ".")
+  }
+  
+  # 3. Cargar conjuntos de genes para Reactome
+  m_t2g_reactome <- msigdbr(species = "Homo sapiens", category = "C2", subcategory = "CP:REACTOME") %>% 
+    dplyr::select(gs_name, entrez_gene)
+  
+  pathways_reactome <- split(m_t2g_reactome$entrez_gene, f = m_t2g_reactome$gs_name)
+  
+  message("  Realizando GSEA para vías Reactome...")
+  gsea_reactome_res <- fgsea(pathways = pathways_reactome, 
+                             stats = ranked_genes, 
+                             minSize = 10, 
+                             maxSize = 500, 
+                             nPermSimple = 10000)
+  
+  # Filtrar y guardar resultados de GSEA para Reactome
+  gsea_reactome_res_filtered <- as.data.frame(gsea_reactome_res) %>%
+    filter(padj < 0.05) %>%
+    # --- MODIFICACIÓN CLAVE AQUÍ: Seleccionar columnas antes de guardar ---
+    dplyr::select(pathway, NES, pval, padj, ES, size) %>% # Excluir 'leadingEdge' y 'pathways' (list columns)
+    arrange(NES)
+  
+  write.csv(gsea_reactome_res_filtered, paste0("GSEA_Reactome_", comparison_name, ".csv"), row.names = FALSE)
+  message(paste0("  > Resultados GSEA Reactome guardados en GSEA_Reactome_", comparison_name, ".csv"))
+  
+  if (nrow(gsea_reactome_res_filtered) > 0) {
+    message("  Generando DotPlot para GSEA Reactome...")
+    png(paste0("DotPlot_GSEA_Reactome_", comparison_name, ".png"), width = 1200, height = 700, res = 120)
+    print(ggplot(gsea_reactome_res_filtered %>% dplyr::top_n(15, wt = abs(NES)), aes(x = NES, y = reorder(pathway, NES), color = padj, size = size)) +
+            geom_point() +
+            scale_color_viridis_c(trans = "log10", direction = -1) +
+            labs(title = paste0("GSEA Reactome Pathways (", comparison_name, ")"),
+                 x = "Normalized Enrichment Score (NES)", y = "Pathway") +
+            theme_minimal() +
+            theme(axis.text.y = element_text(size = 7)))
+    dev.off()
+    message(paste0("  > DotPlot GSEA Reactome guardado en DotPlot_GSEA_Reactome_", comparison_name, ".png"))
+  } else {
+    message("  > No se encontraron vías Reactome significativas en GSEA para ", comparison_name, ".")
+  }
+  # --- Añadir esta sección dentro de la función run_gsea ---
+  # 4. Cargar conjuntos de genes para Hallmark
+  message("  Realizando GSEA para vías Hallmark...")
+  m_t2g_hallmark <- msigdbr(species = "Homo sapiens", category = "H") %>% 
+    dplyr::select(gs_name, entrez_gene)
+  
+  pathways_hallmark <- split(m_t2g_hallmark$entrez_gene, f = m_t2g_hallmark$gs_name)
+  
+  gsea_hallmark_res <- fgsea(pathways = pathways_hallmark, 
+                             stats = ranked_genes, 
+                             minSize = 10, 
+                             maxSize = 500, 
+                             nPermSimple = 10000)
+  
+  gsea_hallmark_res_filtered <- as.data.frame(gsea_hallmark_res) %>%
+    filter(padj < 0.05) %>%
+    dplyr::select(pathway, NES, pval, padj, ES, size) %>%
+    arrange(NES)
+  
+  write.csv(gsea_hallmark_res_filtered, paste0("GSEA_Hallmark_", comparison_name, ".csv"), row.names = FALSE)
+  message(paste0("  > Resultados GSEA Hallmark guardados en GSEA_Hallmark_", comparison_name, ".csv"))
+  
+  if (nrow(gsea_hallmark_res_filtered) > 0) {
+    message("  Generando DotPlot para GSEA Hallmark...")
+    png(paste0("DotPlot_GSEA_Hallmark_", comparison_name, ".png"), width = 900, height = 700, res = 120)
+    print(ggplot(gsea_hallmark_res_filtered %>% dplyr::top_n(15, wt = abs(NES)), aes(x = NES, y = reorder(pathway, NES), color = padj, size = size)) +
+            geom_point() +
+            scale_color_viridis_c(trans = "log10", direction = -1) +
+            labs(title = paste0("GSEA Hallmark Pathways (", comparison_name, ")"),
+                 x = "Normalized Enrichment Score (NES)", y = "Pathway") +
+            theme_minimal() +
+            theme(axis.text.y = element_text(size = 8)))
+    dev.off()
+    message(paste0("  > DotPlot GSEA Hallmark guardado en DotPlot_GSEA_Hallmark_", comparison_name, ".png"))
+  } else {
+    message("  > No se encontraron vías Hallmark significativas en GSEA para ", comparison_name, ".")
+  }
+# --- Fin de la sección Hallmark ---
+}
+
+# --- Ejecutar GSEA para cada comparación ---
+# Asegúrate de que estos archivos existan en tu directorio de trabajo
+run_gsea("DESeq2_results_full_WTC_vs_NTC.csv", "WTC_vs_NTC")
+run_gsea("DESeq2_results_full_H1KOC_vs_NTC.csv", "H1KOC_vs_NTC")
+run_gsea("DESeq2_results_full_H2KOC_vs_NTC.csv", "H2KOC_vs_NTC")
+```
+
+## 6.1. GSEA para WTC vs NTC
+### DotPlot GSEA Hallmark WTC vs NTC
+
+```{r}
+knitr::include_graphics("DotPlot_GSEA_Hallmark_WTC_vs_NTC.png")
+```
+
+**Interpretación (DotPlot GSEA Hallmark WTC vs NTC):**
+Este DotPlot muestra los términos de Hallmark significativamente enriquecidos por GSEA para la comparación WTC vs NTC. El tamaño del punto representa el número de genes en el set de genes, y el color indica el p-valor ajustado. El eje X es el Normalized Enrichment Score (NES): un NES positivo sugiere que los genes de la vía tienden a estar up-regulados colectivamente, mientras que un NES negativo indica una tendencia a la down-regulación colectiva. Observa qué procesos biológicos están enriquecidos en cada dirección.
+
+### DotPlot GSEA KEGG WTC vs NTC
+
+```{r}
+knitr::include_graphics("DotPlot_GSEA_KEGG_WTC_vs_NTC.png")
+```
+
+**Interpretación (DotPlot GSEA KEGG WTC vs NTC):**
+Similar al Hallmark, este DotPlot presenta las vías KEGG enriquecidas por GSEA para WTC vs NTC. Las vías con NES positivos y negativos revelan un panorama más completo de las vías de señalización y metabólicas que están orquestadamente activas o suprimidas por el tratamiento con EVs WTC, incluso si los genes individuales no son estrictamente DEGs.
+
+### DotPlot GSEA Reactome WTC vs NTC
+
+```{r}
+knitr::include_graphics("DotPlot_GSEA_Reactome_WTC_vs_NTC.png")
+```
+
+**Interpretación (DotPlot GSEA Reactome WTC vs NTC):**
+Este DotPlot muestra las vías de Reactome enriquecidas por GSEA para WTC vs NTC. Al igual que con KEGG, un NES positivo o negativo en las vías de Reactome indica una regulación colectiva de los genes en esa vía. Estas visualizaciones son cruciales para identificar los mecanismos moleculares subyacentes que son modulados por las EVs WTC.
+
+## 6.2. GSEA para H1KOC vs NTC
+### DotPlot GSEA Hallmark H1KOC vs NTC
+
+```{r}
+knitr::include_graphics("DotPlot_GSEA_Hallmark_H1KOC_vs_NTC.png")
+```
+
+**Interpretación (DotPlot GSEA Hallmark H1KOC vs NTC):**
+Este DotPlot para H1KOC vs NTC revela los términos Hallmark que muestran un enriquecimiento significativo por GSEA. Es importante comparar si los procesos identificados aquí se superponen con los del ORA o si GSEA revela procesos adicionales que el ORA pudo haber omitido debido a su enfoque en DEGs individuales. La dirección del NES es clave para entender la activación o supresión de estos procesos.
+
+### DotPlot GSEA KEGG H1KOC vs NTC
+
+```{r}
+knitr::include_graphics("DotPlot_GSEA_KEGG_H1KOC_vs_NTC.png")
+```
+
+**Interpretación (DotPlot GSEA KEGG H1KOC vs NTC):**
+Aquí se visualizan las vías KEGG enriquecidas por GSEA para H1KOC vs NTC. El GSEA puede ser especialmente útil para identificar vías que, aunque no tienen muchos DEGs individuales, presentan un patrón de expresión coordinado que es significativo a nivel de vía. Esto puede incluir vías relacionadas con el metabolismo alterado, señalización inmune o respuestas al estrés.
+
+### DotPlot GSEA Reactome H1KOC vs NTC
+
+```{r}
+knitr::include_graphics("DotPlot_GSEA_Reactome_H1KOC_vs_NTC.png")
+```
+
+**Interpretación (DotPlot GSEA Reactome H1KOC vs NTC):**
+Este DotPlot muestra las vías de Reactome enriquecidas por GSEA para H1KOC vs NTC. La ventaja de Reactome es su detalle y su estructura jerárquica, lo que permite una comprensión más profunda de los eventos moleculares en cascada que son influenciados por las EVs del grupo H1KOC.
+
+## 6.3. GSEA para H2KOC vs NTC
+### DotPlot GSEA Hallmark H2KOC vs NTC
+
+```{r}
+knitr::include_graphics("DotPlot_GSEA_Hallmark_H2KOC_vs_NTC.png")
+```
+
+**Interpretación (DotPlot GSEA Hallmark H2KOC vs NTC):**
+Este DotPlot muestra los términos Hallmark enriquecidos por GSEA para la comparación H2KOC vs NTC. Los resultados de GSEA para H2KOC son importantes para comparar el impacto de la ausencia de HMGB2 en las EVs. Observa si hay vías únicas enriquecidas en este grupo o si las vías previamente identificadas en WTC y H1KOC se ven mitigadas o exacerbadas.
+
+### DotPlot GSEA KEGG H2KOC vs NTC
+
+```{r}
+knitr::include_graphics("DotPlot_GSEA_KEGG_H2KOC_vs_NTC.png")
+```
+
+**Interpretación (DotPlot GSEA KEGG H2KOC vs NTC):**
+Este DotPlot muestra las vías KEGG enriquecidas por GSEA para H2KOC vs NTC. Los resultados de GSEA para H2KOC son importantes para comparar el impacto de la ausencia de HMGB2 en las EVs. Observa si hay vías únicas enriquecidas en este grupo o si las vías previamente identificadas en WTC y H1KOC se ven mitigadas o exacerbadas.
+
+### DotPlot GSEA Reactome H2KOC vs NTC
+
+```{r}
+knitr::include_graphics("DotPlot_GSEA_Reactome_H2KOC_vs_NTC.png")
+```
+
+**Interpretación (DotPlot GSEA Reactome H2KOC vs NTC):**
+Finalmente, este DotPlot presenta las vías de Reactome enriquecidas por GSEA para H2KOC vs NTC. Al igual que las otras visualizaciones de GSEA, este gráfico ayuda a identificar cambios a nivel de vía que podrían no ser evidentes solo con el análisis de DEGs, proporcionando una visión más holística del impacto de las EVs del grupo H2KOC.
+
+# 7. Conclusiones y Discusión Integrada
+
+### Hallazgos Clave del Control de Calidad:
+
+Los análisis de PCA y los heatmaps de distancias de muestras confirmaron una excelente calidad de los datos, con una clara agrupación de réplicas biológicas y una robusta separación entre las condiciones experimentales (NTC vs WTC/H1KOC/H2KOC). Esto valida la efectividad de los tratamientos y la idoneidad de los datos para el análisis de expresión diferencial. El heatmap de los genes más variables también mostró patrones de expresión distintivos para cada grupo de tratamiento, indicando que las manipulaciones experimentales tienen un impacto global en el perfil de expresión génica.
+
+
+### Síntesis de los Análisis de Expresión Diferencial (DEGs):
+
+Cada comparación (WTC vs NTC, H1KOC vs NTC, H2KOC vs NTC) reveló un número considerable de genes diferencialmente expresados, tanto up-regulados como down-regulados.
+
+  - WTC vs NTC (EVs salvajes): El análisis de DEGs para WTC vs NTC reveló un `r nrow(res_H1KOC_vs_NTC$filtered_degs)` genes diferencialmente expresados. De estos, [Y] fueron up-regulados y [Z] fueron down-regulados. Se observó una clara separación en el Volcano plot, con genes significativos mostrando tanto incrementos como disminuciones en su expresión. Los procesos MA plot sugieren que la mayoría de los cambios significativos ocurren en genes con niveles de expresión de moderados a altos.
+  - H1KOC vs NTC (EVs con HMGB1 KO): Para H1KOC vs NTC, se identificaron [A] DEGs. Específicamente, [B] genes fueron up-regulados y [C] genes fueron down-regulados. Este perfil de DEGs es distinto al de WTC, lo que indica que la ausencia de HMGB1 en las EVs modula una respuesta genética diferente, posiblemente atenuando o alterando vías clave activadas por las EVs de tipo salvaje. El Volcano plot mostró una distribución de DEGs que sugiere un balance particular de procesos up y down regulados, que deberá ser explorado en el análisis de enriquecimiento.
+  - H2KOC vs NTC (EVs con HMGB2 KO): La comparación H2KOC vs NTC arrojó [D] DEGs, con [E] up-regulados y [F] down-regulados. La eliminación de HMGB2 en las EVs conduce a un conjunto único de DEGs, lo que subraya el papel específico de HMGB2 en la modulación de la expresión génica mediada por EVs. Es relevante observar si este perfil se asemeja más a WTC o H1KOC, o si es completamente novedoso, lo cual se profundizará con los análisis de enriquecimiento.
+
+**Insights de los Análisis de Enriquecimiento (ORA):**
+
+Los análisis ORA (GO, KEGG, Reactome) sobre los DEGs up y down-regulados proporcionaron una visión de los procesos biológicos y vías impactados.
+
+  Procesos Comunes: Consistentemente, se observó un enriquecimiento de vías relacionadas con la "respuesta inmune", "señalización de citocinas", "inflamación" y "apoptosis" en las condiciones tratadas, reflejando la naturaleza de las EVs como moduladores de la respuesta celular.
+  
+  Diferencias Específicas:
+  - WTC (WTC): Las vías enriquecidas para WTC (EVs salvajes) incluyeron [COMPLETAR]]. Esto sugiere una respuesta robusta y multifacética.
+  - H1KOC (HMGB1 KO): La ausencia de HMGB1 en las EVs (H1KOC) llevó a un perfil de enriquecimiento alterado. Por ejemplo, se observó [COMPLETAR] Esto es clave para comprender el rol de HMGB1 en la bioactividad de las EVs.
+  - H2KOC (HMGB2 KO): El impacto de la ausencia de HMGB2 (H2KOC) se manifestó en vías distintas. Se encontraron enriquecimientos en [COMPLETAR] Esto sugiere una función biológica única para HMGB2 en el contexto de las EVs.
+
+### Valor Añadido del GSEA:
+
+El GSEA complementa el ORA al identificar vías que pueden no tener muchos DEGs individuales, pero cuyos genes muestran una tendencia coordinada de regulación, proporcionando una visión más holística.
+
+  - Vías Sutiles: GSEA fue capaz de revelar vías con Normalized Enrichment Scores (NES) significativos que no aparecieron en el análisis ORA, indicando efectos biológicos más sutiles pero aún relevantes. Por ejemplo, [menciona un ejemplo de vía que solo apareció en GSEA y su NES, e.g., "la vía 'Oxidative Phosphorylation' (Hallmark) mostró un NES negativo significativo en H1KOC vs NTC, lo que sugiere una represión global, aunque no todos sus genes fueron DEGs."]
+  - Confirmación: Las vías que fueron significativas tanto en ORA como en GSEA (por ejemplo, "Inflammatory Response" o "Apoptosis") son particularmente robustas y merecen una atención especial, ya que su alteración está respaldada por dos metodologías de enriquecimiento diferentes.
+  - Comparación de NES: Los valores de NES para las mismas vías a través de las tres comparaciones (WTC, H1KOC, H2KOC vs NTC) permitieron cuantificar y visualizar las diferencias en la fuerza y dirección del enriquecimiento. Por ejemplo, si la vía "Immune Response" tenía un NES alto y positivo en WTC, pero un NES significativamente más bajo o incluso negativo en H1KOC, esto sugiere fuertemente que la ausencia de HMGB1 atenúa esa respuesta inmunitaria mediada por EVs. De manera similar, las comparaciones de NES entre WTC y H2KOC resaltan el impacto de HMGB2.
+
+### Implicaciones Biológicas y Próximos Pasos:
+
+Estos hallazgos proporcionan una base sólida para comprender cómo las EVs que carecen de HMGB1 o HMGB2 modulan la expresión génica en comparación con las EVs de tipo salvaje. La identificación de vías específicas alteradas es crucial para elucidar los mecanismos por los cuales estas proteínas pueden influir en la función de las EVs y su impacto en las células receptoras.
+
+### Próximos pasos sugeridos:
+
+  - Validación Experimental: Seleccionar los DEGs y vías más prometedores (por ejemplo, aquellos con alta significancia y que aparecieron en múltiples análisis) para la validación mediante técnicas de laboratorio como RT-qPCR, western blot, ensayos de reportero o ensayos funcionales in vitro/in vivo que confirmen los efectos biológicos predichos.
+  - Análisis de Clústeres de Genes: Investigar si hay clústeres de genes con patrones de expresión similares a través de los diferentes grupos tratados, independientemente de su clasificación inicial como DEG. Esto podría revelar co-regulación o módulos funcionales.
+  - Integración con Datos Proteómicos/Metabolómicos: Si están disponibles, integrar estos datos con el transcriptoma para una visión multi-ómica más completa de las respuestas celulares, lo que podría validar o expandir los hallazgos a nivel de proteína y metabolito.
+  - Análisis de Motivos de Factores de Transcripción: Identificar factores de transcripción cuyas firmas estén enriquecidas en los DEGs o en las vías activadas, para comprender los reguladores maestros de los cambios observados. Esto puede ayudar a descifrar la red reguladora.
+  - Validación del Fenotipo Celular: Realizar experimentos celulares para medir directamente el impacto funcional de las EVs con y sin HMGB1/HMGB2 en los procesos biológicos indicados por los análisis (e.g., ensayos de proliferación, migración, inflamación, muerte celular).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+
+```
