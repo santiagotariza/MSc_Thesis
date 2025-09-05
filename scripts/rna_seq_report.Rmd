@@ -1,0 +1,621 @@
+---
+title: "Análisis de Expresión Diferencial de RNA-Seq"
+author: "Santiago T. Ariza"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    theme: cosmo
+    highlight: tango
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+# Configuración global del chunk
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.align = 'center', fig.width = 8, fig.height = 7)
+
+# Definir la ruta a la carpeta de resultados (relativa a 'scripts')
+results_dir <- "../results"
+```
+
+Resumen del Pipeline
+
+El análisis de RNA-Seq se realizó en muestras de células HOSEPIC tratadas con vesículas extracelulares para estudiar el impacto de los knockouts en los genes HMGB1 y HMGB2. El flujo de trabajo incluyó los siguientes pasos bioinformáticos: control de calidad, alineación y cuantificación de genes.
+
+Posteriormente, se realizaron análisis exploratorios y estadísticos en R.
+
+# Control de Calidad y Pre-procesamiento de Datos Brutos
+
+El primer paso fue evaluar la calidad de las secuencias FASTQ y de los datos de conteo. Los siguientes gráficos resumen las métricas clave.
+
+## Métricas de Calidad de fastp
+
+Las métricas de fastp, como el porcentaje de bases con calidad Q20 y Q30, nos dan una idea de la calidad de las lecturas de secuenciación antes y después del recorte de adaptadores.
+
+```{r}
+# Cargar el gráfico generado por el script 02_exploratory_qc_analysis.R
+fastp_plot_path <- file.path(results_dir, "02_fastp_quality_metrics.png")
+if (file.exists(fastp_plot_path)) {
+  knitr::include_graphics(fastp_plot_path)
+} else {
+  cat("El gráfico de métricas de fastp no se encontró en el directorio de resultados. Por favor, asegúrese de que el script '02_exploratory_qc_analysis.R' se haya ejecutado correctamente.")
+}
+```
+
+## Distribución de Conteos Brutos
+
+El análisis de la distribución de conteos brutos es fundamental para identificar posibles sesgos o muestras atípicas antes de la normalización.
+
+### Distribución de Conteos de mRNA
+
+```{r}
+raw_counts_plot_mRNA_path <- file.path(results_dir, "02_mRNA_raw_counts_distribution.png")
+if (file.exists(raw_counts_plot_mRNA_path)) {
+  knitr::include_graphics(raw_counts_plot_mRNA_path)
+} else {
+  cat("El gráfico de distribución de conteos brutos de mRNA no se encontró. Por favor, ejecute '02_exploratory_qc_analysis.R'.")
+}
+```
+
+### Distribución de Conteos de lncRNA
+
+```{r}
+raw_counts_plot_lncRNA_path <- file.path(results_dir, "02_lncRNA_raw_counts_distribution.png")
+if (file.exists(raw_counts_plot_lncRNA_path)) {
+  knitr::include_graphics(raw_counts_plot_lncRNA_path)
+} else {
+  cat("El gráfico de distribución de conteos brutos de lncRNA no se encontró. Por favor, ejecute '02_exploratory_qc_analysis.R'.")
+}
+```
+
+## Heatmaps de Correlación de Conteos Brutos
+
+### Heatmap de Correlación de mRNA
+
+```{r}
+correlation_heatmap_mRNA_path <- file.path(results_dir, "02_mRNA_correlation_heatmap.png")
+if (file.exists(correlation_heatmap_mRNA_path)) {
+  knitr::include_graphics(correlation_heatmap_mRNA_path)
+} else {
+  cat("El heatmap de correlación de mRNA no se encontró. Por favor, ejecute '02_exploratory_qc_analysis.R'.")
+}
+```
+
+### Heatmap de Correlación de lncRNA
+
+```{r}
+correlation_heatmap_lncRNA_path <- file.path(results_dir, "02_lncRNA_correlation_heatmap.png")
+if (file.exists(correlation_heatmap_lncRNA_path)) {
+  knitr::include_graphics(correlation_heatmap_lncRNA_path)
+} else {
+  cat("El heatmap de correlación de lncRNA no se encontró. Por favor, ejecute '02_exploratory_qc_analysis.R'.")
+}
+```
+
+# Análisis Exploratorio de Datos
+
+Esta sección se centra en visualizar las relaciones entre las muestras y el impacto de la corrección del efecto de lote.
+
+## PCA y Heatmap (sin Corrección de Lote)
+
+El Análisis de Componentes Principales (PCA) y el heatmap de correlación muestran cómo se agrupan las muestras basándose en su patrón de expresión génica antes de cualquier corrección.
+
+### PCA de mRNA
+
+```{r}
+pca_unfiltered_mrna_path <- file.path(results_dir, "04_mRNA_pca_vsd.png")
+if (file.exists(pca_unfiltered_mrna_path)) {
+  knitr::include_graphics(pca_unfiltered_mrna_path)
+} else {
+  cat("El gráfico PCA de mRNA sin corrección no se encontró. Ejecute '04_exploratory_plots.R'.")
+}
+```
+
+### Heatmap de mRNA
+
+```{r}
+heatmap_unfiltered_mrna_path <- file.path(results_dir, "04_mRNA_heatmap_top_var_genes_vsd.png")
+if (file.exists(heatmap_unfiltered_mrna_path)) {
+  knitr::include_graphics(heatmap_unfiltered_mrna_path)
+} else {
+  cat("El heatmap de mRNA sin corrección no se encontró. Ejecute '04_exploratory_plots.R'.")
+}
+```
+
+## Corrección del Efecto de Lote con ComBat
+
+A partir de los resultados del PCA anterior, se observa un efecto de lote que podría enmascarar las diferencias biológicas. Se utilizó el algoritmo ComBat para corregir esta variabilidad técnica.
+
+### PCA de mRNA con ComBat
+
+```{r}
+pca_combat_mrna_path <- file.path(results_dir, "05_mRNA_pca_combat_corrected.png")
+if (file.exists(pca_combat_mrna_path)) {
+  knitr::include_graphics(pca_combat_mrna_path)
+} else {
+  cat("El gráfico PCA de mRNA corregido con ComBat no se encontró. Ejecute '05_correct_batch_effect.R'.")
+}
+```
+
+### Heatmap de mRNA con ComBat
+
+```{r}
+heatmap_combat_mrna_path <- file.path(results_dir, "05_mRNA_heatmap_combat_corrected.png")
+if (file.exists(heatmap_combat_mrna_path)) {
+  knitr::include_graphics(heatmap_combat_mrna_path)
+} else {
+  cat("El heatmap de mRNA corregido con ComBat no se encontró. Ejecute '05_correct_batch_effect.R'.")
+}
+```
+
+# Análisis de lncRNA
+
+Los mismos análisis exploratorios se repitieron para los datos de ARN no codificantes largos (lncRNA).
+
+## PCA y Heatmap de lncRNA (sin Corrección)
+
+### PCA de lncRNA
+
+```{r}
+pca_unfiltered_lncrna_path <- file.path(results_dir, "04_lncRNA_pca_vsd.png")
+if (file.exists(pca_unfiltered_lncrna_path)) {
+  knitr::include_graphics(pca_unfiltered_lncrna_path)
+} else {
+  cat("El gráfico PCA de lncRNA sin corrección no se encontró. Ejecute '04_exploratory_plots.R'.")
+}
+```
+
+### Heatmap de lncRNA
+
+```{r}
+heatmap_unfiltered_lncrna_path <- file.path(results_dir, "04_lncRNA_heatmap_top_var_genes_vsd.png")
+if (file.exists(heatmap_unfiltered_lncrna_path)) {
+  knitr::include_graphics(heatmap_unfiltered_lncrna_path)
+} else {
+  cat("El heatmap de lncRNA sin corrección no se encontró. Ejecute '04_exploratory_plots.R'.")
+}
+```
+
+## Corrección de Lote para lncRNA con ComBat
+
+### PCA de lncRNA con ComBat
+
+```{r}
+pca_combat_lncrna_path <- file.path(results_dir, "05_lncRNA_pca_combat_corrected.png")
+if (file.exists(pca_combat_lncrna_path)) {
+  knitr::include_graphics(pca_combat_lncrna_path)
+} else {
+  cat("El gráfico PCA de lncRNA corregido con ComBat no se encontró. Ejecute '05_correct_batch_effect.R'.")
+}
+```
+
+### Heatmap de lncRNA con ComBat
+
+```{r}
+heatmap_combat_lncrna_path <- file.path(results_dir, "05_lncRNA_heatmap_combat_corrected.png")
+if (file.exists(heatmap_combat_lncrna_path)) {
+  knitr::include_graphics(heatmap_combat_lncrna_path)
+} else {
+  cat("El heatmap de lncRNA corregido con ComBat no se encontró. Ejecute '05_correct_batch_effect.R'.")
+}
+```
+
+# Análisis de Expresión Diferencial (DE)
+
+El análisis de expresión diferencial se realizó utilizando el paquete DESeq2 para identificar genes y lncRNAs con cambios significativos entre las condiciones. Los siguientes Volcano Plots visualizan los resultados de cada comparación.
+
+## Expresión Diferencial de mRNA
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+# Cargar los objetos dds para obtener el total de genes analizados.
+# Esto asume que el archivo 03_dds_vsd_objects.RData está disponible.
+load(file.path(results_dir, "03_dds_vsd_objects.RData"))
+total_genes_mRNA <- nrow(mRNA_obj$dds)
+
+# Definir las comparaciones para los gráficos de mRNA
+mRNA_comparisons <- list(
+  "G3_HMGB1_KO_vs_G1_NTC",
+  "G4_HMGB2_KO_vs_G1_NTC",
+  "G2_WTC_vs_G1_NTC",
+  "G3_HMGB1_KO_vs_G4_HMGB2_KO",
+  "G3_HMGB1_KO_vs_G2_WTC",
+  "G4_HMGB2_KO_vs_G2_WTC"
+)
+
+# Bucle para incluir cada gráfico de Volcano Plot
+for (comp in mRNA_comparisons) {
+  volcano_plot_path <- file.path(results_dir, paste0("06_mRNA_", comp, "_volcano_plot.png"))
+  results_csv_path <- file.path(results_dir, paste0("06_mRNA_", comp, "_DE_results.csv"))
+  
+  if (file.exists(volcano_plot_path) && file.exists(results_csv_path)) {
+    # Cargar los resultados DE para contar los genes
+    de_results <- read.csv(results_csv_path, stringsAsFactors = FALSE)
+    num_genes_sig <- nrow(de_results)
+    
+    # Contar los genes sobreexpresados y subexpresados
+    num_upregulated <- sum(de_results$log2FoldChange > 0, na.rm = TRUE)
+    num_downregulated <- sum(de_results$log2FoldChange < 0, na.rm = TRUE)
+    
+    # Construir el título y el resumen en una sola cadena
+    markdown_output <- paste0(
+      "### Volcano Plot: mRNA ", comp, "\n\n",
+      "**Resumen del análisis:**\n\n",
+      "- **Total de genes analizados:** ", total_genes_mRNA, "\n",
+      "- **Genes significativos:** ", num_genes_sig, "\n",
+      "- **Genes Up-regulados:** ", num_upregulated, "\n",
+      "- **Genes Down-regulados:** ", num_downregulated, "\n\n",
+      "![Volcano Plot for mRNA ", comp, "](", volcano_plot_path, ")\n\n"
+    )
+    
+    # Imprimir la cadena Markdown completa
+    cat(markdown_output)
+  } else {
+    cat(paste0("El gráfico o el archivo de resultados para '", comp, "' no se encontraron.\n\n"))
+  }
+}
+```
+
+## Expresión Diferencial de lncRNA
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+# Cargar los objetos dds para obtener el total de lncRNAs analizados.
+# Esto asume que el archivo 03_dds_vsd_objects.RData está disponible.
+load(file.path(results_dir, "03_dds_vsd_objects.RData"))
+total_lncRNAs <- nrow(lncRNA_obj$dds)
+
+# Definir las comparaciones para los gráficos de lncRNA
+lncRNA_comparisons <- list(
+  "G3_HMGB1_KO_vs_G1_NTC",
+  "G4_HMGB2_KO_vs_G1_NTC",
+  "G2_WTC_vs_G1_NTC",
+  "G3_HMGB1_KO_vs_G4_HMGB2_KO",
+  "G3_HMGB1_KO_vs_G2_WTC",
+  "G4_HMGB2_KO_vs_G2_WTC"
+)
+
+# Bucle para incluir cada gráfico de Volcano Plot
+for (comp in lncRNA_comparisons) {
+  volcano_plot_path <- file.path(results_dir, paste0("06_lncRNA_", comp, "_volcano_plot.png"))
+  results_csv_path <- file.path(results_dir, paste0("06_lncRNA_", comp, "_DE_results.csv"))
+  
+  if (file.exists(volcano_plot_path) && file.exists(results_csv_path)) {
+    # Cargar los resultados DE para contar los lncRNAs
+    de_results <- read.csv(results_csv_path, stringsAsFactors = FALSE)
+    num_lncRNAs_sig <- nrow(de_results)
+    
+    # Contar los lncRNAs sobreexpresados y subexpresados
+    num_upregulated <- sum(de_results$log2FoldChange > 0, na.rm = TRUE)
+    num_downregulated <- sum(de_results$log2FoldChange < 0, na.rm = TRUE)
+    
+    # Construir el título y el resumen en una sola cadena
+    markdown_output <- paste0(
+      "### Volcano Plot: lncRNA ", comp, "\n\n",
+      "**Resumen del análisis:**\n\n",
+      "- **Total de lncRNAs analizados:** ", total_lncRNAs, "\n",
+      "- **lncRNAs significativos:** ", num_lncRNAs_sig, "\n",
+      "- **lncRNAs Up-regulados:** ", num_upregulated, "\n",
+      "- **lncRNAs Down-regulados:** ", num_downregulated, "\n\n",
+      "![Volcano Plot for lncRNA ", comp, "](", volcano_plot_path, ")\n\n"
+    )
+    
+    # Imprimir la cadena Markdown completa
+    cat(markdown_output)
+  } else {
+    cat(paste0("El gráfico o el archivo de resultados para '", comp, "' no se encontraron.\n\n"))
+  }
+}
+```
+
+# Análisis de Enriquecimiento (ORA)
+
+Se realizó un análisis de enriquecimiento de sobre-representación (ORA) para los genes diferencialmente expresados (DEGs) de mRNA, utilizando los términos de Gene Ontology (GO) y las vías de Reactome. Los resultados se visualizan a continuación en forma de dotplots.
+
+```{r ora_plots, echo=FALSE, results='asis', warning=FALSE, message=FALSE}
+library(knitr)
+library(stringr)
+
+# Definir las comparaciones de interés
+comparisons <- c(
+  "G3_HMGB1_KO_vs_G1_NTC",
+  "G4_HMGB2_KO_vs_G1_NTC",
+  "G2_WTC_vs_G1_NTC",
+  "G3_HMGB1_KO_vs_G4_HMGB2_KO",
+  "G3_HMGB1_KO_vs_G2_WTC",
+  "G4_HMGB2_KO_vs_G2_WTC"
+)
+
+# Definir los análisis y tipos de gráfico
+analyses <- c("GO", "Reactome")
+
+for (comp in comparisons) {
+  cat("### Comparación:", comp, "\n\n")
+  
+  for (analys in analyses) {
+    # Construir la ruta al archivo PNG
+    img_path <- file.path(results_dir, paste0("07_mRNA_ORA_", analys, "_dotplot_", comp, ".png"))
+    
+    # Verificar si el archivo existe antes de incluirlo
+    if (file.exists(img_path)) {
+      cat("#### ORA", analys, "Dotplot\n\n")
+      cat("![](", img_path, ")\n\n")
+    } else {
+      cat(paste("No se encontró el archivo de gráfico para ORA", analys, "en", comp, "\n\n"))
+    }
+  }
+  cat("\n---\n\n")
+}
+```
+
+# Análisis de Enriquecimiento de Conjunto de Genes (GSEA)
+
+Se realizó un análisis GSEA para identificar si los genes de conjuntos funcionales específicos tienden a estar agrupados en los extremos (upregulated o downregulated) de la lista de genes clasificada. Se presentan los dotplots para los términos de Gene Ontology y Reactome, junto con los gráficos gseaplot2 detallados.
+
+```{r gsea_plots, echo=FALSE, results='asis', warning=FALSE, message=FALSE}
+library(knitr)
+library(stringr)
+
+# Definir las comparaciones de interés
+comparisons <- c(
+  "G3_HMGB1_KO_vs_G1_NTC",
+  "G4_HMGB2_KO_vs_G1_NTC",
+  "G2_WTC_vs_G1_NTC",
+  "G3_HMGB1_KO_vs_G4_HMGB2_KO",
+  "G3_HMGB1_KO_vs_G2_WTC",
+  "G4_HMGB2_KO_vs_G2_WTC"
+)
+
+# Definir los análisis y tipos de gráfico
+gsea_analyses <- c("GO", "Reactome")
+
+for (comp in comparisons) {
+  cat("### Comparación:", comp, "\n\n")
+  
+  # Incluir el dotplot de GSEA para GO
+  go_dotplot_path <- file.path(results_dir, paste0("08_mRNA_GSEA_GO_dotplot_", comp, ".png"))
+  if (file.exists(go_dotplot_path)) {
+    cat("#### GSEA GO Dotplot\n\n")
+    cat("![](", go_dotplot_path, ")\n\n")
+  }
+
+  # Incluir el dotplot de GSEA para Reactome
+  reactome_dotplot_path <- file.path(results_dir, paste0("08_mRNA_GSEA_Reactome_dotplot_", comp, ".png"))
+  if (file.exists(reactome_dotplot_path)) {
+    cat("#### GSEA Reactome Dotplot\n\n")
+    cat("![](", reactome_dotplot_path, ")\n\n")
+  }
+  
+  # Incluir el gseaplot2, que es específico de GO
+  gseaplot2_path <- file.path(results_dir, paste0("08_mRNA_GSEA_gseaplot2_", comp, ".png"))
+  if (file.exists(gseaplot2_path)) {
+    cat("#### GSEA Plot detallado\n\n")
+    cat("![](", gseaplot2_path, ")\n\n")
+  }
+  
+  cat("\n---\n\n")
+}
+```
+
+
+<!-- # Gráficos de Enriquecimiento por lncRNA -->
+<!-- Los siguientes dotplots y barplots muestran los términos de GO enriquecidos para cada uno de los lncRNAs más significativos en cada comparación. -->
+
+<!-- ```{r coexp_plots, echo=FALSE, results='asis', warning=FALSE, message=FALSE} -->
+<!-- library(knitr) -->
+<!-- library(stringr) -->
+
+<!-- results_dir <- normalizePath("../results", mustWork = FALSE) -->
+
+<!-- # Definir las comparaciones de interés -->
+<!-- lncRNA_comparisons <- c( -->
+<!--   "G3_HMGB1_KO_vs_G1_NTC", -->
+<!--   "G4_HMGB2_KO_vs_G1_NTC", -->
+<!--   "G2_WTC_vs_G1_NTC", -->
+<!--   "G3_HMGB1_KO_vs_G4_HMGB2_KO", -->
+<!--   "G3_HMGB1_KO_vs_G2_WTC", -->
+<!--   "G4_HMGB2_KO_vs_G2_WTC" -->
+<!-- ) -->
+
+<!-- for (comp in lncRNA_comparisons) { -->
+<!--   cat(paste("### Comparación:", comp, "\n\n")) -->
+
+<!--   # Buscar todos los gráficos de esa comparación -->
+<!--   file_list <- list.files(results_dir, pattern = paste0("^09_lncRNA_", comp, "_coexpression_.*\\.png$"), full.names = TRUE) -->
+
+<!--   if (length(file_list) > 0) { -->
+<!--     # Extraer el ID único de los lncRNAs de los nombres de archivo -->
+<!--     lncRNA_ids <- unique(str_extract(basename(file_list), "ENSG[0-9]+")) -->
+
+<!--     for (lncRNA_id in lncRNA_ids) { -->
+<!--       cat(paste("#### lncRNA:", lncRNA_id, "\n\n")) -->
+
+<!--       dotplot_path <- file.path(results_dir, paste0("09_lncRNA_", comp, "_coexpression_dotplot_", lncRNA_id, ".png")) -->
+<!--       barplot_path <- file.path(results_dir, paste0("09_lncRNA_", comp, "_coexpression_barplot_", lncRNA_id, ".png")) -->
+
+<!--       if (file.exists(dotplot_path)) { -->
+<!--         img_markdown <- paste0("![](", dotplot_path, ")\n\n") -->
+<!--         cat(img_markdown) -->
+<!--       } -->
+<!--       if (file.exists(barplot_path)) { -->
+<!--         img_markdown <- paste0("![](", barplot_path, ")\n\n") -->
+<!--         cat(img_markdown) -->
+<!--       } -->
+<!--     } -->
+<!--   } else { -->
+<!--     cat("No se encontraron gráficos de co-expresión para esta comparación.\n\n") -->
+<!--   } -->
+<!--   cat("\n---\n\n") -->
+<!-- } -->
+<!-- ``` -->
+
+# Resumen de Vías Co-expresadas
+
+A continuación, se presenta una tabla con los términos de Gene Ontology más significativos encontrados a través del análisis ORA en los genes co-expresados con los lncRNAs candidatos.
+
+```{r coexp_summary_table, echo=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+library(DT)
+
+results_dir <- normalizePath("../results", mustWork = FALSE)
+consolidated_path <- file.path(results_dir, "10_consolidated_coexpression_ORA_results.csv")
+
+if (file.exists(consolidated_path)) {
+  coexp_results <- read_csv(consolidated_path, show_col_types = FALSE) %>%
+    arrange(comparison, lncRNA_id, p.adjust)
+
+  # Puedes mostrar la tabla completa o solo las filas más significativas (ej. p.adjust < 0.01)
+  datatable(coexp_results, 
+            options = list(pageLength = 10, searching = TRUE), 
+            caption = "Términos de GO significativos en genes co-expresados con lncRNAs candidatos")
+} else {
+  cat("No se encontró el archivo de resultados consolidados.")
+}
+```
+
+# ORFs Putativos en lncRNAs Candidatos
+
+Se predijeron Open Reading Frames (ORFs) en los lncRNAs diferencialmente expresados utilizando sus secuencias de transcripción. La siguiente tabla resume los hallazgos, mostrando la cantidad de ORFs encontrados y la longitud del ORF más largo para cada lncRNA.
+
+```{r orf_summary_table, echo=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(DT)
+
+# Definir el directorio de resultados (si no está en un chunk anterior)
+results_dir <- normalizePath("../results", mustWork = FALSE)
+orf_summary_path <- file.path(results_dir, "11_predicted_lncRNA_ORFs.csv")
+
+if (file.exists(orf_summary_path)) {
+  orf_data <- read_csv(orf_summary_path, show_col_types = FALSE)
+  
+  orf_summary <- orf_data %>%
+    group_by(lncRNA_id) %>%
+    summarise(
+      total_orfs = n(),
+      longest_orf_aa = max(length_aa, na.rm = TRUE),
+      .groups = 'drop'
+    ) %>%
+    arrange(desc(longest_orf_aa))
+    
+  datatable(orf_summary, 
+            options = list(pageLength = 10, searching = TRUE), 
+            caption = "ORFs putativos en lncRNAs candidatos")
+} else {
+  cat("No se encontró el archivo de resultados de ORFs. Asegúrate de haber ejecutado el script 11.")
+}
+```
+
+# Top lncRNAs Candidatos con ORFs Putativos
+
+Se realizó un resumen de los lncRNAs más prometedores, agrupando la información por cada ID de lncRNA para identificar los ORFs más largos y las vías biológicas asociadas.
+
+
+<!-- ```{r detailed_candidate_sections, echo=FALSE, message=FALSE, warning=FALSE, results='asis'} -->
+<!-- library(tidyverse) -->
+<!-- library(DT) -->
+<!-- library(dplyr) -->
+<!-- library(htmltools) -->
+
+<!-- candidates_path <- "../results/13_top_lncRNA_candidates.csv" -->
+
+<!-- if (file.exists(candidates_path)) { -->
+<!--   top_candidates_df <- read_csv(candidates_path, show_col_types = FALSE) -->
+<!--   unique_lncRNAs <- unique(top_candidates_df$lncRNA_id) -->
+
+<!--   for (lncRNA_id in unique_lncRNAs) { -->
+<!--     # Paso 1: Filtrar el dataframe para el lncRNA actual -->
+<!--     lncRNA_data <- top_candidates_df %>% -->
+<!--       filter(lncRNA_id == !!lncRNA_id) %>% -->
+<!--       # Paso 2: Seleccionar las columnas para mostrar en la tabla -->
+<!--       dplyr::select( -->
+<!--         comparison, Description, p.adjust, Count, length_aa, start, end, length_nt -->
+<!--       ) -->
+
+<!--     first_row <- lncRNA_data[1, ] -->
+
+<!--     # Crear texto descriptivo como HTML -->
+<!--     header <- tags$h4(paste("Candidato:", lncRNA_id)) -->
+<!--     description <- tags$p(HTML(paste0( -->
+<!--       "Este lncRNA fue identificado en la comparación <code>", first_row$comparison, -->
+<!--       "</code> y tiene un ORF de hasta <strong>", max(lncRNA_data$length_aa), -->
+<!--       "</strong> aminoácidos. A continuación se detallan las vías de mRNA asociadas con su co-expresión." -->
+<!--     ))) -->
+
+<!--     # Crear tabla interactiva -->
+<!--     lncRNA_table <- DT::datatable(lncRNA_data, -->
+<!--                                   options = list(pageLength = 10, searching = FALSE), -->
+<!--                                   caption = paste("Detalles para", lncRNA_id)) -->
+
+<!--     # Mostrar todo junto como un bloque HTML -->
+<!--     print(tagList(header, description, lncRNA_table, tags$hr())) -->
+<!--   } -->
+<!-- } else { -->
+<!--   cat("El archivo de candidatos principales no se encontró. Asegúrate de haber ejecutado el script 13.") -->
+<!-- } -->
+
+<!-- ``` -->
+
+
+
+```{r detailed_candidate_sections2, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+library(tidyverse)
+library(DT)
+library(dplyr)
+library(htmltools)
+
+candidates_path <- "../results/13_top_lncRNA_candidates.csv"
+results_dir <- "../results"
+
+if (file.exists(candidates_path)) {
+  top_candidates_df <- read_csv(candidates_path, show_col_types = FALSE)
+  unique_lncRNAs <- unique(top_candidates_df$lncRNA_id)
+  
+  for (lncRNA_id in unique_lncRNAs) {
+    # Filtrar datos del lncRNA
+    lncRNA_data <- top_candidates_df %>%
+      filter(lncRNA_id == !!lncRNA_id) %>%
+      dplyr::select(comparison, Description, p.adjust, Count, length_aa, start, end, length_nt)
+    
+    first_row <- lncRNA_data[1, ]
+    
+    # Encabezado y descripción
+    header <- tags$h4(paste("Candidato:", lncRNA_id))
+    description <- tags$p(HTML(paste0(
+      "Este lncRNA fue identificado en la comparación <code>", first_row$comparison,
+      "</code> y tiene un ORF de hasta <strong>", max(lncRNA_data$length_aa),
+      "</strong> aminoácidos. A continuación se detallan las vías de mRNA asociadas con su co-expresión."
+    )))
+    
+    # Mostrar encabezado, descripción y tabla
+    print(tagList(header, description))
+    
+    lncRNA_table <- DT::datatable(
+      lncRNA_data,
+      options = list(pageLength = 10, searching = FALSE),
+      caption = paste("Detalles para", lncRNA_id)
+    )
+    print(lncRNA_table)
+    
+    # Rutas a las imágenes
+    dotplot_file <- file.path(results_dir, paste0("13_final_candidates_dotplot_", lncRNA_id, ".png"))
+    barplot_file <- file.path(results_dir, paste0("13_final_candidates_barplot_", lncRNA_id, ".png"))
+
+    if (file.exists(dotplot_file) && file.exists(barplot_file)) {
+      cat("#### Gráficos de Enriquecimiento\n\n")
+      cat("Los siguientes gráficos muestran las principales vías biológicas asociadas con el lncRNA candidato, basándose en el análisis de co-expresión de sus mRNAs correlacionados.\n\n")
+      
+      # Insertar imágenes como en el chunk de GSEA
+      cat("![](", dotplot_file, "){width=600px}\n\n")
+      cat("![](", barplot_file, "){width=600px}\n\n")
+    } else {
+      cat("<p><em>No se encontraron los gráficos para este lncRNA.</em></p>\n")
+    }
+    
+    cat("\n---\n\n")
+  }
+} else {
+  cat("<p>El archivo de candidatos principales no se encontró. Asegúrate de haber ejecutado el script 13.</p>")
+}
+```

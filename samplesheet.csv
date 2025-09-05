@@ -1,0 +1,13 @@
+sample_id,read1,read2
+NTC1,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Non_treated/NTC1_1.fq.gz,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Non_treated/NTC1_2.fq.gz
+NTC2,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Non_treated/NTC2_1.fq.gz,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Non_treated/NTC2_2.fq.gz
+NTC3,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Non_treated/NTC3_1.fq.gz,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Non_treated/NTC3_2.fq.gz
+H1KOC1,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Treated_with_HMGB1_KO_EVs/H1KOC1_1.fq.gz,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Treated_with_HMGB1_KO_EVs/H1KOC1_2.fq.gz
+H1KOC2,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Treated_with_HMGB1_KO_EVs/H1KOC2_1.fq.gz,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Treated_with_HMGB1_KO_EVs/H1KOC2_2.fq.gz
+H1KOC3,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Treated_with_HMGB1_KO_EVs/H1KOC3_1.fq.gz,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Treated_with_HMGB1_KO_EVs/H1KOC3_2.fq.gz
+H2KOC1,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Treated_with_HMGB2_KO_EVs/H2KOC1_1.fq.gz,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Treated_with_HMGB2_KO_EVs/H2KOC1_2.fq.gz
+H2KOC2,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Treated_with_HMGB2_KO_EVs/H2KOC2_1.fq.gz,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Treated_with_HMGB2_KO_EVs/H2KOC2_2.fq.gz
+H2KOC3,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Treated_with_HMGB2_KO_EVs/H2KOC3_1.fq.gz,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Treated_with_HMGB2_KO_EVs/H2KOC3_2.fq.gz
+WTC1,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Treated_with_WT_EVs/WTC1_1.fq.gz,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Treated_with_WT_EVs/WTC1_2.fq.gz
+WTC2,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Treated_with_WT_EVs/WTC2_1.fq.gz,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Treated_with_WT_EVs/WTC2_2.fq.gz
+WTC3,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Treated_with_WT_EVs/WTC3_1.fq.gz,/mnt/lustre/scratch/nlsas/home/ulc/co/sab/HOSEPIC_EVs_RNA_seq/Treated_with_WT_EVs/WTC3_2.fq.gz
