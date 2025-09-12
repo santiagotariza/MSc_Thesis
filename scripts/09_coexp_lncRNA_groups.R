@@ -25,9 +25,13 @@ library(DESeq2)
 library(enrichplot)
 library(ggplot2)
 
+
 # --- PARAMETERS ---
-padj_threshold <- 0.01
-top_lncRNAs_to_analyze <- 10   # Number of top lncRNAs per comparison
+padj_threshold <- 0.05
+log2fc_threshold <- 1
+baseMean_threshold <- 10
+top_lncRNAs_to_analyze <- 5 
+
 
 # --- DIRECTORIES ---
 if (requireNamespace("rstudioapi", quietly = TRUE) && rstudioapi::isAvailable()) {
@@ -58,10 +62,7 @@ vsd_lncRNA <- lncRNA_obj$vsd
 lncRNA_comparisons <- c(
   "G3_HMGB1_KO_vs_G1_NTC",
   "G4_HMGB2_KO_vs_G1_NTC",
-  "G2_WTC_vs_G1_NTC",
-  "G3_HMGB1_KO_vs_G4_HMGB2_KO",
-  "G3_HMGB1_KO_vs_G2_WTC",
-  "G4_HMGB2_KO_vs_G2_WTC"
+  "G2_WTC_vs_G1_NTC"
 )
 
 # --- RUNNING CO-EXPRESSION ANALYSIS ---
@@ -81,9 +82,18 @@ for (comp_name in lncRNA_comparisons) {
     if (nrow(de_results) > 0) {
       # Select top lncRNAs for this comparison
       top_lncRNAs <- de_results %>%
-        filter(padj < padj_threshold) %>%
-        arrange(padj) %>%
+        filter(
+          padj < padj_threshold,
+          abs(log2FoldChange) > log2fc_threshold,
+          baseMean > baseMean_threshold
+        ) %>%
+        mutate(relevance_score = -log10(padj) * abs(log2FoldChange)) %>%
+        arrange(desc(relevance_score)) %>%
         head(top_lncRNAs_to_analyze)
+      
+      message(paste("    -", nrow(top_lncRNAs), "selected lncRNAs after applying filters"))
+      
+      
       
       if (nrow(top_lncRNAs) > 0) {
         for (i in 1:nrow(top_lncRNAs)) {

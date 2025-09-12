@@ -2,7 +2,7 @@
 # Script: 08_GSEA.R
 # Purpose: Perform Gene Set Enrichment Analysis (GSEA) for DE genes
 # Input:   DE results (from script 06) and dds objects
-# Output:  GSEA results (RData, CSV), dotplots and enrichment plots (PNG)
+# Output:  GSEA results (RData, CSV) and enrichment plots (PNG) for GO and Reactome
 ##############################################
 
 # --- Libraries ---
@@ -16,7 +16,7 @@ library(ReactomePA)
 library(DESeq2)
 
 # --- Parameters ---
-padj_threshold <- 0.01
+padj_threshold <- 0.05
 
 # --- Define directories ---
 if (requireNamespace("rstudioapi", quietly = TRUE) && rstudioapi::isAvailable()) {
@@ -31,10 +31,7 @@ dir.create(results_dir, showWarnings = FALSE, recursive = TRUE)
 comparisons <- c(
   "G3_HMGB1_KO_vs_G1_NTC",
   "G4_HMGB2_KO_vs_G1_NTC",
-  "G2_WTC_vs_G1_NTC",
-  "G3_HMGB1_KO_vs_G4_HMGB2_KO",
-  "G3_HMGB1_KO_vs_G2_WTC",
-  "G4_HMGB2_KO_vs_G2_WTC"
+  "G2_WTC_vs_G1_NTC"
 )
 
 # --- Load expression data ---
@@ -123,15 +120,11 @@ for (comp_name in comparisons) {
                 file = file.path(results_dir, paste0("08_mRNA_GSEA_GO_", comp_name, ".csv")), 
                 row.names = FALSE)
       
-      dotplot_gsea_go <- dotplot(gsea_go, showCategory = 15) +
-        ggtitle(paste("GSEA GO Dotplot:", comp_name))
-      ggsave(file.path(results_dir, paste0("08_mRNA_GSEA_GO_dotplot_", comp_name, ".png")),
-             dotplot_gsea_go, width = 10, height = 8)
-      
-      gsea_plot <- gseaplot2(gsea_go, geneSetID = 1:min(5, nrow(gsea_go)),
-                             title = paste("GSEA - Top Pathways for mRNA:", comp_name))
-      ggsave(file.path(results_dir, paste0("08_mRNA_GSEA_gseaplot2_", comp_name, ".png")),
-             gsea_plot, width = 10, height = 8)
+      # Generates gseaplot2 for GO
+      gsea_plot_go <- gseaplot2(gsea_go, geneSetID = 1:min(5, nrow(gsea_go)),
+                                title = paste("GSEA - Top GO Pathways for mRNA:", comp_name))
+      ggsave(file.path(results_dir, paste0("08_mRNA_GSEA_GO_gseaplot2_", comp_name, ".png")),
+             gsea_plot_go, width = 10, height = 8)
     } else {
       message("    - No significant GO results found. Skipping.")
     }
@@ -142,10 +135,11 @@ for (comp_name in comparisons) {
                 file = file.path(results_dir, paste0("08_mRNA_GSEA_Reactome_", comp_name, ".csv")), 
                 row.names = FALSE)
       
-      dotplot_reactome_gsea <- dotplot(gsea_reactome, showCategory = 15) +
-        ggtitle(paste("GSEA Reactome Dotplot:", comp_name))
-      ggsave(file.path(results_dir, paste0("08_mRNA_GSEA_Reactome_dotplot_", comp_name, ".png")),
-             dotplot_reactome_gsea, width = 10, height = 8)
+      # Generates gseaplot2 for Reactome
+      gsea_plot_reactome <- gseaplot2(gsea_reactome, geneSetID = 1:min(5, nrow(gsea_reactome)),
+                                      title = paste("GSEA - Top Reactome Pathways for mRNA:", comp_name))
+      ggsave(file.path(results_dir, paste0("08_mRNA_GSEA_Reactome_gseaplot2_", comp_name, ".png")),
+             gsea_plot_reactome, width = 10, height = 8)
     } else {
       message("    - No significant Reactome results found. Skipping.")
     }

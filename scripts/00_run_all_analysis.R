@@ -1,8 +1,10 @@
 #!/usr/bin/env Rscript
 
 # =========================================================
-# 00_run_all_analysis.R - Executes the complete RNA-seq pipeline
+# 00_run_all_analysis.R - Executes the complete RNA-seq Analysis pipeline
 # =========================================================
+
+# Estimated processing time = 15min
 
 # --- DIRECTORIES ---
 if (requireNamespace("rstudioapi", quietly = TRUE) && rstudioapi::isAvailable()) {
@@ -11,12 +13,7 @@ if (requireNamespace("rstudioapi", quietly = TRUE) && rstudioapi::isAvailable())
   script_dir <- dirname(normalizePath(sys.frame(1)$ofile))
 }
 
-setwd(script_dir)  # <- Añade esta línea
-
-# 1. Guarda el tiempo de inicio
-tiempo_inicio <- proc.time()
-
-
+setwd(script_dir)
 
 
 # List of scripts in execution order
@@ -38,7 +35,7 @@ scripts <- c(
 )
 
 cat("====================================================\n")
-cat("STARTING COMPLETE RNA-seq PIPELINE\n")
+cat("STARTING RNA-seq ANALYSIS\n")
 cat("====================================================\n\n")
 
 for (script in scripts) {
@@ -59,22 +56,8 @@ for (script in scripts) {
 }
 
 cat("====================================================\n")
-cat("RNA-seq PIPELINE COMPLETED SUCCESSFULLY\n")
+cat("ANALYSIS COMPLETED SUCCESSFULLY\n")
 cat("Results available in: results/\n")
 cat("Fastp reports: fastp_reports/\n")
 cat("Final HTML report: results/rna_seq_report.html\n")
 cat("====================================================\n")
-
-# 3. Guarda el tiempo de finalización
-tiempo_final <- proc.time()
-
-# 4. Calcula y muestra la diferencia
-tiempo_ejecucion <- tiempo_final - tiempo_inicio
-print(tiempo_ejecucion)
-
-# install.packages("renv")
-# 
-# renv::init()  # solo la primera vez
-# 
-# 
-# renv::snapshot()

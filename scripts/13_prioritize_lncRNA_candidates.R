@@ -4,21 +4,20 @@
 #
 # Input:
 #   - 12_integrated_ORF_pathways_summary.csv
-#       (integrated ORFs and pathway enrichment results)
+#     (integrated ORFs and pathway enrichment results)
 #   - 09_lncRNA_*_coexpression_ORA_<lncRNA>.RData
-#       (GO enrichment results for candidate lncRNAs, required for plots)
+#     (GO enrichment results for candidate lncRNAs, required for plots)
 #
 # Output:
 #   - 13_top_lncRNA_candidates.csv
-#       (prioritized candidate list based on filtering criteria)
+#     (prioritized candidate list based on filtering criteria)
 #   - 13_final_candidates_dotplot_<lncRNA>.png
-#   - 13_final_candidates_barplot_<lncRNA>.png
-#       (visualizations of pathway enrichment for prioritized candidates)
+#     (visualizations of pathway enrichment for prioritized candidates)
 #
 # Description:
 #   This script applies filtering criteria to prioritize lncRNAs with
 #   significant ORFs and biologically relevant pathways. It also generates
-#   visualization plots (dotplots and barplots) for the top candidates.
+#   visualization plots (dotplots) for the top candidates.
 # ============================================================
 
 # --- LOAD LIBRARIES ---
@@ -47,6 +46,12 @@ if (!file.exists(integrated_data_path)) {
 
 integrated_df <- read_csv(integrated_data_path, show_col_types = FALSE)
 
+colnames(integrated_df)
+class(integrated_df)
+str(integrated_df)
+
+
+
 # --- PRIORITIZATION CRITERIA ---
 message("Applying filtering and prioritization criteria...")
 
@@ -57,11 +62,22 @@ relevance_terms <- c(
 )
 relevance_pattern <- paste(relevance_terms, collapse = "|")
 
+
+orf_counts <- dplyr::count(integrated_df, lncRNA_id, name = "n_ORFs")
+
+
+
+# Add counts to the original dataframe
+integrated_df <- left_join(integrated_df, orf_counts, by = "lncRNA_id")
+
+# Filter
 top_candidates_df <- integrated_df %>%
-  filter(length_aa >= 80) %>%          # ORF minimum length
-  filter(p.adjust < 0.001) %>%         # statistical threshold
-  # filter(str_detect(Description, relevance_pattern)) %>% # optional biological relevance filter
-  arrange(p.adjust, desc(length_aa), desc(Count))
+  filter(p.adjust < 0.05) %>%
+  # From here you can filter how many ORFs should have the lncRNA
+  #filter(n_ORFs <= 100) %>%
+  arrange(p.adjust, desc(Count))
+
+
 
 # --- SAVE PRIORITIZED LIST ---
 output_path <- file.path(results_dir, "13_top_lncRNA_candidates.csv")
@@ -84,20 +100,14 @@ generate_and_save_plots <- function(lncRNA_id, comp_name, results_dir) {
     load(ora_results_path)
     
     if (!is.null(go_enrich_lncRNA) && nrow(go_enrich_lncRNA) > 0) {
+      
+      #go_enrich_lncRNA$Description <- str_wrap(go_enrich_lncRNA$Description, width = 45)
       # Dotplot
-      dotplot_go <- dotplot(go_enrich_lncRNA, showCategory = 15) +
+      dotplot_go <- dotplot(go_enrich_lncRNA, showCategory = 10) +
         ggtitle(paste("Co-expression ORA:", lncRNA_id, "-", comp_name))
       ggsave(
         file.path(results_dir, paste0("13_final_candidates_dotplot_", lncRNA_id, ".png")),
-        dotplot_go, width = 10, height = 8
-      )
-      
-      # Barplot
-      barplot_go <- barplot(go_enrich_lncRNA, showCategory = 15) +
-        ggtitle(paste("Co-expression ORA:", lncRNA_id, "-", comp_name))
-      ggsave(
-        file.path(results_dir, paste0("13_final_candidates_barplot_", lncRNA_id, ".png")),
-        barplot_go, width = 10, height = 8
+        dotplot_go, width = 10, height = 10
       )
       
       message(paste("  - Plots generated for", lncRNA_id))

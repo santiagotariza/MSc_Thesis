@@ -7,7 +7,7 @@
 
 if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
 
-BiocManager::install("sva", ask = FALSE)
+BiocManager::install("sva", update = TRUE, force =TRUE)
 
 
 # --- Libraries ---

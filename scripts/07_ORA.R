@@ -2,7 +2,7 @@
 # Script: 07_ORA.R
 # Purpose: Perform Over-Representation Analysis (ORA) for DE genes
 # Input:   DE results (from script 06)
-# Output:  ORA results (RData, CSV), dotplots (PNG)
+# Output:  ORA results (RData, CSV), dotplots (PNG) for both GO and Reactome
 ##############################################
 
 # --- Libraries ---
@@ -16,7 +16,7 @@ library(ReactomePA)
 
 # --- Parameters ---
 log2FC_threshold <- 1
-padj_threshold <- 0.01
+padj_threshold <- 0.05
 
 # --- Define directories ---
 if (requireNamespace("rstudioapi", quietly = TRUE) && rstudioapi::isAvailable()) {
@@ -36,10 +36,7 @@ gene_id_to_entrez <- function(gene_id_list) {
 comparisons <- c(
   "G3_HMGB1_KO_vs_G1_NTC",
   "G4_HMGB2_KO_vs_G1_NTC",
-  "G2_WTC_vs_G1_NTC",
-  "G3_HMGB1_KO_vs_G4_HMGB2_KO",
-  "G3_HMGB1_KO_vs_G2_WTC",
-  "G4_HMGB2_KO_vs_G2_WTC"
+  "G2_WTC_vs_G1_NTC"
 )
 
 # --- Run ORA for mRNA genes ---
@@ -88,7 +85,7 @@ for (comp_name in comparisons) {
                 file = file.path(results_dir, paste0("07_mRNA_ORA_GO_", comp_name, ".csv")), 
                 row.names = FALSE)
       
-      dotplot_go <- dotplot(go_enrich, showCategory = 15) +
+      dotplot_go <- dotplot(go_enrich, showCategory = 10) +
         ggtitle(paste("ORA GO Dotplot:", comp_name))
       ggsave(file.path(results_dir, paste0("07_mRNA_ORA_GO_dotplot_", comp_name, ".png")),
              dotplot_go, width = 10, height = 8)
@@ -102,7 +99,7 @@ for (comp_name in comparisons) {
                 file = file.path(results_dir, paste0("07_mRNA_ORA_Reactome_", comp_name, ".csv")), 
                 row.names = FALSE)
       
-      dotplot_reactome <- dotplot(reactome_enrich, showCategory = 15) +
+      dotplot_reactome <- dotplot(reactome_enrich, showCategory = 10) +
         ggtitle(paste("ORA Reactome Dotplot:", comp_name))
       ggsave(file.path(results_dir, paste0("07_mRNA_ORA_Reactome_dotplot_", comp_name, ".png")),
              dotplot_reactome, width = 10, height = 8)

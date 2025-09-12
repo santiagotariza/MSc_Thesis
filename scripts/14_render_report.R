@@ -42,7 +42,7 @@ message("Rendering the RNA-seq report...")
 setwd(script_dir)
 
 render(
-  input = basename(rmd_path),          # Use only the filename; wd is now correct
+  input = basename(rmd_path),
   output_format = "html_document",
   output_dir = results_dir,
   output_file = "rna_seq_report.html",
