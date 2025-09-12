@@ -1,15 +1,16 @@
 # ========================================
-# Combined RNA-seq Analysis & Processing Container
-# Includes R 4.5.1 with renv, fastp, STAR, featureCounts, and Nextflow
+# RNA-seq Analysis & Processing Container
+# Includes R 4.5.1 with renv, fastp, STAR, featureCounts, and optionally Nextflow
 # ========================================
 
 # Base image
 FROM ubuntu:22.04
 
 # -----------------------------
-# Environment variables
+# Environment setup
 # -----------------------------
 ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=en_US.UTF-8
 ENV PATH="/opt/nextflow:${PATH}"
 
 # -----------------------------
@@ -42,33 +43,35 @@ RUN apt-get update && apt-get install -y \
     libxt-dev \
     libcairo2-dev \
     libx11-dev \
+    libncurses5-dev \
+    libbz2-dev \
+    xz-utils \
+    liblzma-dev \
     && locale-gen en_US.UTF-8 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+
 # -----------------------------
-# Install R 4.5.1
+# Install R (latest stable from CRAN)
 # -----------------------------
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    r-base=4.5.1* \
-    r-base-dev=4.5.1* \
+RUN apt-get update && apt-get install -y --no-install-recommends software-properties-common dirmngr gnupg apt-transport-https ca-certificates \
+    && wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | tee /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc \
+    && add-apt-repository "deb https://cloud.r-project.org/bin/linux/ubuntu jammy-cran40/" \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends r-base r-base-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # -----------------------------
-# Install renv for package management
+# Install renv for R package management
 # -----------------------------
 RUN R -e "install.packages('renv', repos='https://cloud.r-project.org')"
-
-
-
-# --- If your system already has the next packages then you may skip the following installation steps ---
-
 
 # -----------------------------
 # Install fastp
 # -----------------------------
-RUN wget -O /usr/local/bin/fastp https://github.com/OpenGene/fastp/releases/download/v0.22.0/fastp \
+RUN wget -O /usr/local/bin/fastp http://opengene.org/fastp/fastp.0.22.0 \
     && chmod +x /usr/local/bin/fastp
 
 # -----------------------------
@@ -83,33 +86,33 @@ RUN wget -O /tmp/STAR.tar.gz https://github.com/alexdobin/STAR/archive/2.7.9a.ta
     && rm -rf /tmp/STAR*
 
 # -----------------------------
-# Install featureCounts (Subread)
+# Install featureCounts (from Subread)
 # -----------------------------
-RUN wget -O /tmp/subread-2.0.5-Linux-x86_64.tar.gz https://sourceforge.net/projects/subread/files/subread-2.0.5/subread-2.0.5-Linux-x86_64.tar.gz/download \
-    && tar -xzf /tmp/subread-2.0.5-Linux-x86_64.tar.gz -C /opt/ \
+RUN wget -O /tmp/subread.tar.gz https://sourceforge.net/projects/subread/files/subread-2.0.5/subread-2.0.5-Linux-x86_64.tar.gz/download \
+    && tar -xzf /tmp/subread.tar.gz -C /opt/ \
     && ln -s /opt/subread-2.0.5-Linux-x86_64/bin/featureCounts /usr/local/bin/featureCounts \
     && rm -rf /tmp/subread*
 
 # -----------------------------
-# Install Nextflow (Optional: only use it if you plan to run the Nextflow pipeline version)
+# Install Nextflow (optional)
 # -----------------------------
-#RUN curl -s https://get.nextflow.io | bash \
-#    && mv nextflow /opt/nextflow/nextflow \
-#    && chmod +x /opt/nextflow/nextflow
+# RUN curl -s https://get.nextflow.io | bash \
+#     && mkdir -p /opt/nextflow \
+#     && mv nextflow /opt/nextflow/nextflow \
+#     && chmod +x /opt/nextflow/nextflow
 
 # -----------------------------
-# Set working directories
+# Set working directory in container
 # -----------------------------
-RUN mkdir -p /data/scripts /data/results /data/fastp_reports /data/genome /data/genome_index /data/fastq
+WORKDIR /app
 
-# Set working directory
-WORKDIR /data
-
-# Copy project files (including renv.lock if available)
+# Copiar archivos del proyecto (incluyendo scripts/ y renv.lock)
 COPY . .
 
-# Restore R environment if renv.lock is present
-RUN R -e "if (file.exists('renv.lock')) renv::restore(confirm = FALSE)"
+# Inicializar y restaurar entorno renv
+RUN R -e "renv::init(bare = TRUE); renv::restore(confirm = FALSE)"
 
+# -----------------------------
 # Default command
+# -----------------------------
 CMD ["R"]

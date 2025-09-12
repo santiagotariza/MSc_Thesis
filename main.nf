@@ -24,7 +24,7 @@ params.bam_dir          = "/mnt/lustre/scratch/nlsas/home/ulc/co/sab/bam_files"
 //                     PROCESSES                  //
 ////////////////////////////////////////////////////
 
-// Quality trimming with fastp
+// Preprocess raw FASTQ files using fastp (trimming, filtering, QC reports)
 process FASTP {
     tag "$sample_id"
 
@@ -53,7 +53,7 @@ process FASTP {
     """
 }
 
-// STAR genome index generation
+// Generate STAR genome index (only if not already present)
 process STAR_INDEX {
     tag "genome_index"
 
@@ -79,13 +79,12 @@ process STAR_INDEX {
     """
 }
 
-// STAR alignment
+// Align trimmed reads to genome using STAR, produce BAM + log files
 process STAR_ALIGN {
     tag "$sample_id"
 
     input:
-    tuple val(sample_id), path(r1), path(r2)
-    path genome_index_dir
+    tuple val(sample_id), path(r1), path(r2), path(genome_index_dir)
 
     output:
     tuple val(sample_id),
@@ -99,7 +98,6 @@ process STAR_ALIGN {
 
     script:
     """
-    # Skip if BAM already exists
     if [ -f ${params.bam_dir}/${sample_id}.Aligned.sortedByCoord.out.bam ]; then
         echo "BAM for ${sample_id} already exists, skipping STAR_ALIGN"
         cp ${params.bam_dir}/${sample_id}.Aligned.sortedByCoord.out.bam .
@@ -113,7 +111,6 @@ process STAR_ALIGN {
          --outFileNamePrefix "${sample_id}." \
          --outSAMtype BAM SortedByCoordinate
 
-    # Check BAM creation
     if [ ! -s ${sample_id}.Aligned.sortedByCoord.out.bam ]; then
         echo "ERROR: BAM file not created properly" >&2
         exit 1
@@ -121,13 +118,12 @@ process STAR_ALIGN {
     """
 }
 
-// Gene counts using featureCounts
+// Generate gene-level read counts with featureCounts from all BAMs
 process FEATURECOUNTS {
     tag "all_samples"
 
     input:
-    path bams
-    path annotation_gtf
+    tuple path(bams), path(annotation_gtf)
 
     output:
     path "gene_counts.txt"
@@ -148,17 +144,17 @@ process FEATURECOUNTS {
 
 workflow {
 
-    // Read samplesheet and create sample tuples
+    // Load and parse samplesheet into (sample_id, read1, read2) tuples
     samples_ch = Channel
         .fromPath(params.samplesheet)
         .splitCsv(header: true)
         .map { row -> tuple(row.sample_id, file(row.read1), file(row.read2)) }
 
-    // Reference channels
+    // Reference genome and annotation channels
     genome_fasta_ch   = Channel.fromPath("${params.genome_dir}/GRCh38.primary_assembly.genome.fa")
     annotation_gtf_ch = Channel.fromPath(params.annotation)
 
-    // Reuse STAR index if exists
+    // Use pre-existing STAR index if available, otherwise build a new one
     def index_dir = file(params.genome_index)
     def hasIndex = index_dir.exists() && (index_dir.list() ?: []).size() > 5
 
@@ -166,21 +162,22 @@ workflow {
         ? Channel.value(index_dir) \
         : STAR_INDEX(genome_fasta_ch, annotation_gtf_ch)
 
-    // Trim FASTQ files
+    // Run FASTQ trimming
     fastp_out_ch = samples_ch | FASTP
     trimmed_ch   = fastp_out_ch.map { id, r1, r2, html, json -> tuple(id, r1, r2) }
 
-    // Generate or reuse BAM files
-    aligned_ch = trimmed_ch.map { id, r1, r2 ->
-        def bam_file = file("${params.bam_dir}/${id}.Aligned.sortedByCoord.out.bam")
-        if (bam_file.exists()) {
-            tuple(id, bam_file)
-        } else {
-            STAR_ALIGN(tuple(id, r1, r2), genome_index_ch)
+    // Pair trimmed reads with genome index for alignment
+    def star_input_ch = trimmed_ch
+        .combine(genome_index_ch)
+        .map { tuple4 ->
+            def (sample_id, r1, r2, genome_index) = tuple4
+            tuple(sample_id, r1, r2, genome_index)
         }
-    }
 
-    // Extract BAMs and run featureCounts
+    // Run STAR alignment
+    aligned_ch = STAR_ALIGN(star_input_ch)
+
+    // Collect all BAMs and run featureCounts
     all_bams_ch = aligned_ch.map { it[1] }.collect()
-    FEATURECOUNTS(all_bams_ch, annotation_gtf_ch)
+    FEATURECOUNTS(all_bams_ch.combine(annotation_gtf_ch))
 }
